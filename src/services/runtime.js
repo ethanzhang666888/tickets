@@ -10,6 +10,7 @@ import { applyTheme } from "./theme";
 import { setWechatEnabled, syncWechatConnection, taskWechatConfig, testWechatNotification as sendWechatTest } from "./wechatSettings";
 import { accountStorageKey, emptyAccounts, loadAccounts, upsertAccount, removeAccount, defaultAccount } from "./accounts";
 import { normalizeSettings, commitSettings, restoreLegacySettings } from "./settings";
+import { androidActive } from "./android.js";
 
 export const desktop = typeof window !== "undefined" && Boolean(window.__TAURI_IPC__);
 export function readLocal(key, fallback) {
@@ -217,7 +218,7 @@ export function initializeRuntime() {
             const { confirm } = await import("@tauri-apps/api/dialog");
             await appWindow.onCloseRequested(async event => {
                 const hasNotifications = taskList.value.some(task => task.notificationStatus === "pending");
-                if ((activeTasks.value.length || hasNotifications) && !await confirm(hasNotifications ? "仍有微信通知正在发送，退出应用会中断发送和运行中的任务。确定退出？" : "仍有购票或监控任务在运行，退出应用会停止这些任务。确定退出？", { title: "退出 Tickets", type: "warning" })) event.preventDefault();
+                if ((activeTasks.value.length || hasNotifications || androidActive.value) && !await confirm(hasNotifications ? "仍有微信通知正在发送，退出应用会中断发送和运行中的任务。确定退出？" : "仍有购票、监控或手机演练任务在运行，退出应用会停止这些任务。确定退出？", { title: "退出 Tickets", type: "warning" })) event.preventDefault();
             });
         }
         runtime.ready = true;

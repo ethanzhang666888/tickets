@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_audit_open">一次性核对大麦页面（仅节点，不截图不点击）</string>
+    <string name="native_audit_help">用于验证选票、观演人或确认页结构。先停止录屏，随后仅允许一次电脑核对请求，2 分钟后失效。不会导出姓名、证件号码或页面文字；不授权购买或提交。</string>
+    <string name="native_audit_armed">已开启一次原生节点核对，2 分钟内有效。请停在目标页面，不提交订单。</string>
+</resources>

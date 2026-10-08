@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_description">读取大麦和本应用的测试页面。在手机本地明确确认任务后，可点击已适配的大麦原生控件并停止于确认页；不选择观演人、不提交订单、不支付。远程配对接口不能启动任务。节点和截图仅在内存处理，不保存、不外传。锁屏或关闭权限后任务停止。</string>
+    <item name="synthetic_target" type="id" />
+</resources>

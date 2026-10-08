@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pairing_generate">生成 8 位配对码（有效 2 分钟）</string>
+    <string name="pairing_revoke">撤销当前配对码</string>
+    <string name="pairing_inactive">当前没有有效配对码。点击上方按钮生成，再手动输入电脑。</string>
+    <string name="pairing_active">一次性配对码：%1$s\n生成后 2 分钟有效，最多 5 次错误尝试。请仅在自己的电脑输入。</string>
+    <string name="pairing_help">不再需要输入长令牌。重新生成或撤销会使旧配对码失效；已配对电脑的令牌仅在进程内保留，重启后失效。</string>
+    <string name="capture_stop_and_revoke">停止屏幕读取并撤销配对码</string>
+</resources>

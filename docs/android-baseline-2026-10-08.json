@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "backend": "mac-uiautomator",
+  "mode": "read_only",
+  "device": { "model": "SEA-AL10", "sdk": 29, "harmonyVersion": "4.0.0", "damaiVersion": "9.0.35" },
+  "pageKind": "detail",
+  "firstReadMs": 10276.06,
+  "firstReadOcrMs": 7527.8,
+  "warmSampleCount": 30,
+  "warmMedianMs": 417.54,
+  "warmP95Ms": 690.63,
+  "treeMedianMs": 212.0,
+  "screenshotMedianMs": 154.75,
+  "ocrCacheHitCount": 30,
+  "warmElapsedSamplesMs": [462.34,581.22,415.5,387.79,433.43,410.45,425.97,412.01,442.81,426.29,413.82,571.71,448.92,391.86,393.24,431.17,411.98,404.7,397.32,401.9,693.63,415.13,417.35,469.43,417.73,422.0,435.12,392.03,413.15,690.63],
+  "percentileMethod": "nearest-rank",
+  "limitations": ["同一真实详情页只读，不点击或提交。", "首次样本是本进程首次读取，不是全新安装冷启动。", "30次热读取全部命中OCR缓存。", "不代表库存刷新、下单延迟、高峰成功率或网页与桌面对比。"]
+}

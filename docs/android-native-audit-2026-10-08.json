@@ -1,0 +1,127 @@
+{
+  "date": "2026-10-08",
+  "stage": "feasibility",
+  "executionSupported": false,
+  "scope": "Manually selected Damai pages only. No purchase, reservation, submit or payment action was sent. Native audit uses no screenshot or OCR and exports only fixed counters; no names, document digits or source text are retained.",
+  "observations": [
+    {
+      "description": "Attempt to validate the manually opened selection page did not pass. Capture had stopped on an incomplete scan; later inspection triggered the existing broad confirmation/payment keyword guard. Neither result identifies the exact visible page.",
+      "check": "real_selection_page_read_only",
+      "passed": false,
+      "captureState": "node_scan_incomplete",
+      "error": "payment_foreground",
+      "lastIncompleteScan": {"nodeCount": 64, "nativeMs": 567, "truncated": true},
+      "validSelectionOcrTimingMs": null
+    },
+    {
+      "description": "Native-only audit request was rejected before a local one-use grant was enabled on the phone.",
+      "check": "native_audit_requires_local_grant",
+      "passed": true,
+      "error": "native_audit_not_armed"
+    },
+    {
+      "description": "After manual one-use grant, a complete native scan returned 40 nodes. None of the known selection, confirmation or buyer structural markers was found. One broad payment label is not proof of an actual cashier page. This is a successful bounded audit, not a passed target-page feasibility gate.",
+      "captureState": "native_audit_only",
+      "nodeCount": 40,
+      "textNodeCount": 18,
+      "clickableCount": 11,
+      "nativeMs": 56,
+      "truncated": false,
+      "captureDiagnostics": {"phase": "idle", "receivedFrames": 0, "rejectedFrames": 0, "ocrStarted": false},
+      "nativeAudit": {
+        "sessionContainerCount": 0, "tierContainerCount": 0,
+        "confirmationTitleCount": 0, "dialogCount": 0,
+        "checkboxCount": 0, "checkedCheckboxCount": 0,
+        "maskedIdentifierNodeCount": 0, "documentTypeNodeCount": 0,
+        "scrollableNodeCount": 0, "submitButtonCount": 0,
+        "paymentLabelCount": 1, "identityTriplesVerified": false,
+        "executionReady": false
+      }
+    },
+    {
+      "description": "Operator explicitly confirmed that the visible page showed both session dates and ticket prices. The repeated native-only audit completed but still found none of the known selection containers. This establishes a mismatch between the visible picker and available recognized native structure, not the cause of that mismatch.",
+      "check": "operator_confirmed_picker_native_audit",
+      "passedTargetGate": false,
+      "captureState": "native_audit_only",
+      "nodeCount": 39,
+      "textNodeCount": 17,
+      "clickableCount": 11,
+      "nativeMs": 44,
+      "truncated": false,
+      "sessionContainerCount": 0,
+      "tierContainerCount": 0,
+      "confirmationTitleCount": 0,
+      "paymentLabelCount": 1,
+      "screenshotMs": 0,
+      "ocrMs": 0,
+      "identityTriplesVerified": false,
+      "executionReady": false
+    },
+    {
+      "description": "Count-only window/layout diagnostics on the operator-held picker. Exactly one readable Damai window matched the active, focused and inspected window. The page had session/tier labels and 22 native resource IDs, but not the old known containers. These counters do not identify the new resource names, prove full content coverage, or authorize a click.",
+      "check": "picker_window_layout_diagnostics",
+      "nodeCount": 39,
+      "nativeMs": 57,
+      "truncated": false,
+      "appWindowCount": 1,
+      "activeAppWindowCount": 1,
+      "focusedAppWindowCount": 1,
+      "inspectedWindowMatchCount": 1,
+      "resourceIdNodeCount": 22,
+      "webViewNodeCount": 0,
+      "sessionLabelNodeCount": 2,
+      "tierLabelNodeCount": 1,
+      "sessionContainerCount": 0,
+      "tierContainerCount": 0,
+      "paymentLabelCount": 1,
+      "screenshotMs": 0,
+      "ocrMs": 0,
+      "executionReady": false
+    },
+    {
+      "description": "The bounded structural-metadata APK installed successfully, but the local pairing input did not produce a valid eight-digit code. The client stopped before pairing or sending native_audit. No resource-name/hierarchy result was obtained, and this is not a device page-read failure.",
+      "check": "bounded_structure_retest",
+      "status": "blocked_on_local_pairing",
+      "inspectionSent": false,
+      "purchaseActionSent": false
+    },
+    {
+      "description": "Successful local pairing and one-use audit on the user-held picker. Static layout metadata is complete. The page uses preform_scrollview with direct session/tier headings, anonymous clickable cards and a separate bottom_layout; it does not expose the legacy flow-layout containers. All recorded selected/checked flags were false, so this result does not establish the desired selection.",
+      "check": "measured_picker_layout",
+      "nodeCount": 40,
+      "textNodeCount": 18,
+      "clickableCount": 11,
+      "nativeMs": 53,
+      "truncated": false,
+      "resourceIdNodeCount": 23,
+      "nativeStructureComplete": true,
+      "staticMarkers": ["preform_scrollview", "tv_perform_name", "tv_price_name", "tv_title", "bottom_layout", "btn_buy_view", "tv_num"],
+      "selectedNodeCount": 0,
+      "checkedNodeCount": 0,
+      "authorizedTargetVerified": false,
+      "purchaseActionSent": false,
+      "ocrStarted": false
+    },
+    {
+      "description": "After installing the measured-layout read gate, the stable picker was recognized with a complete 40-node / 17 ms scan. Capture had already stopped after a transition scan of 167 nodes / 511 ms exceeded the unchanged 500 ms budget. Retained complete OCR diagnostics belong to an earlier request, not a valid current picker result. The planned 30-sample group was not started; cleanup Stop was acknowledged.",
+      "check": "recognized_picker_capture_first_trial",
+      "pickerLayoutRecognized": true,
+      "nodeCount": 40,
+      "nativeMs": 17,
+      "captureState": "node_scan_incomplete",
+      "lastIncompleteScan": {"nodeCount": 167, "nativeMs": 511, "truncated": true},
+      "pickerCapturePassed": false,
+      "authorizedTargetVerified": false,
+      "purchaseActionSent": false,
+      "cleanupStopAcknowledged": true
+    },
+    {
+      "description": "A second request after the earlier 40-node audit, without a new local grant, was rejected. That earlier trial's cleanup Stop was acknowledged.",
+      "check": "native_audit_one_use",
+      "passed": true,
+      "error": "native_audit_not_armed",
+      "cleanupStopAcknowledged": true
+    }
+  ],
+  "status": "The later paired run successfully collected a complete 40-node static layout. Its new picker structure is recognized for read-only capture only; selected flags do not prove any target. A manually authorized screenshot/OCR trial is next. Exact session/tier selection, buyer identities, confirmation fields and full phone execution remain unverified. Native audit never authorizes screenshots or clicks; MediaProjection consent is separate. No two-hour stability result exists."
+}

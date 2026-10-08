@@ -18,6 +18,7 @@
       "active": true,
       "targets": "all",
       "identifier": "com.tickets",
+      "resources": ["../tools/android/*.py", "../tools/android/*.swift"],
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",

@@ -1,0 +1,129 @@
+{
+  "date": "2026-10-08",
+  "stage": "feasibility",
+  "executionSupported": false,
+  "device": {"model": "SEA-AL10", "androidApi": 29, "damaiPackage": "cn.damai"},
+  "scope": "Companion synthetic page only; no Damai purchase actions, screenshots, OCR text, identities or pairing credentials recorded.",
+  "observations": [
+    {
+      "description": "Earlier authenticated synthetic check reached the native test click counter but capture timed out before diagnostics existed.",
+      "testClickCount": 1,
+      "captureState": "capture_or_ocr_timeout",
+      "ocrTimingMs": null
+    },
+    {
+      "description": "Diagnostic build: capture had stopped before the requested inspection, during a missing foreground-window state.",
+      "pageKind": "synthetic",
+      "nodeCount": 11,
+      "nativeMs": 34,
+      "captureState": "foreground_unavailable",
+      "summaryCaptureState": "not_requested",
+      "captureDiagnostics": {"phase": "idle", "receivedFrames": 0, "rejectedFrames": 0, "maxFrameClockBehindMs": 0, "ocrStarted": false},
+      "ocrTimingMs": null
+    },
+    {
+      "description": "After bounded idle transition handling: 62 delivered frames were all rejected by the timestamp comparison. OCR never started. The difference is not a measured frame age.",
+      "captureState": "capture_or_ocr_timeout",
+      "captureDiagnostics": {"phase": "frame_rejected_timestamp", "receivedFrames": 62, "rejectedFrames": 62, "maxFrameClockBehindMs": 1069068, "ocrStarted": false},
+      "ocrTimingMs": null
+    },
+    {
+      "description": "Fresh-reader generation build: one frame arrived and no frame was rejected by timestamp. The blank-frame check stopped capture before OCR. This does not establish whether the window was protected or the first frame was transiently blank.",
+      "captureState": "secure_or_blank_frame",
+      "captureDiagnostics": {"phase": "capture_failed", "receivedFrames": 1, "rejectedFrames": 0, "maxFrameClockBehindMs": 1069197, "ocrStarted": false},
+      "ocrTimingMs": null
+    },
+    {
+      "description": "Guided synthetic-page retest completed both captures and OCR callbacks after the operator was instructed to leave both simulation switches off. Two timings establish pipeline completion, not recognition accuracy or real Damai readability; OCR block counts were not retained by this sampling report.",
+      "pageKind": "synthetic",
+      "pageIdentityVerified": false,
+      "firstSample": {"nativeMs": 3, "screenshotMs": 69, "ocrMs": 662, "usbRoundTripMs": 800.85},
+      "warmSamples": [{"nativeMs": 4, "screenshotMs": 67, "ocrMs": 349, "usbRoundTripMs": 556.07}],
+      "captureState": "ready",
+      "summaryCaptureState": "complete"
+    },
+    {
+      "description": "Thirty warm synthetic capture/OCR callbacks completed; the first request of this group was not process-cold. Full timing samples are in android-synthetic-baseline-2026-10-08.json.",
+      "warmSampleCount": 30,
+      "ocrMs": {"median": 331.5, "p95": 384},
+      "usbRoundTripMs": {"median": 586.935, "p95": 608.2}
+    },
+    {
+      "description": "Separate synthetic nonempty-result check; only counts, dimensions and timings exported, not text. Recognition accuracy was not measured.",
+      "pageKind": "synthetic",
+      "nodeCount": 11,
+      "nativeMs": 5,
+      "screenshotMs": 74,
+      "ocrMs": 380,
+      "ocrBlockCount": 26,
+      "ocrCandidateCount": 1,
+      "screenshotWidth": 1080,
+      "screenshotHeight": 2340,
+      "captureState": "ready",
+      "summaryCaptureState": "complete",
+      "captureDiagnostics": {"phase": "complete", "receivedFrames": 1, "rejectedFrames": 0, "maxFrameClockBehindMs": 1069183, "ocrStarted": true}
+    },
+    {
+      "description": "Operator enabled the synthetic secure-window checkbox after the successful nonempty OCR check. Capture stopped before OCR; a cleanup stop request was acknowledged. No protection bypass was attempted.",
+      "captureState": "secure_or_blank_frame",
+      "captureDiagnostics": {"phase": "capture_failed", "receivedFrames": 1, "rejectedFrames": 0, "maxFrameClockBehindMs": 1069188, "ocrStarted": false}
+    },
+    {
+      "description": "First manually navigated real Damai trial: projection had stopped on an incomplete node scan before the requested sample. The later native-only inspection returned 86 nodes in 99 ms, unknown page category and no capture. Retained complete/OCR diagnostics belong to an earlier request and are not evidence of OCR for this page. Thirty warm samples were not started.",
+      "captureState": "node_scan_incomplete",
+      "summaryCaptureState": "not_requested",
+      "pageKind": "unknown",
+      "nodeCount": 86,
+      "nativeMs": 99,
+      "truncated": false,
+      "ocrTimingMs": null
+    },
+    {
+      "description": "Diagnostic-only real-page retest retained the actual failed traversal: five nodes in 114 ms with truncation. This triggers the original 100 ms deadline rather than the 1,200-node limit. A later complete native-only scan took 39 ms for 86 nodes. Capture remained stopped; no valid real-page OCR timing was recorded.",
+      "captureState": "node_scan_incomplete",
+      "lastIncompleteScan": {"nodeCount": 5, "nativeMs": 114, "truncated": true, "pageKind": "unknown"},
+      "laterNativeScan": {"nodeCount": 86, "nativeMs": 39, "truncated": false, "pageKind": "unknown"},
+      "ocrTimingMs": null
+    },
+    {
+      "description": "First explicit real-page retest after increasing the traversal budget to 500 ms completed native inspection, capture and nonempty OCR. Fixed classification was detail; exact page identity and recognition accuracy were not verified. No clicks were sent.",
+      "captureState": "ready",
+      "summaryCaptureState": "complete",
+      "pageKind": "detail",
+      "nodeCount": 86,
+      "nativeMs": 10,
+      "screenshotMs": 127,
+      "ocrMs": 327,
+      "ocrBlockCount": 32,
+      "ocrCandidateCount": 1,
+      "screenshotWidth": 1080,
+      "screenshotHeight": 2340,
+      "truncated": false,
+      "captureDiagnostics": {"phase": "complete", "receivedFrames": 1, "rejectedFrames": 0, "maxFrameClockBehindMs": 1069183, "ocrStarted": true}
+    },
+    {
+      "description": "Thirty warm real Damai detail-page capture/OCR requests completed on the 500 ms traversal-budget build, followed by an acknowledged capture Stop. Exact page identity was operator-held, not verified by the protocol. Full timing samples are in android-phone-detail-baseline-2026-10-08.json.",
+      "pageKind": "detail",
+      "warmSampleCount": 30,
+      "ocrMs": {"median": 346.5, "p95": 414},
+      "usbRoundTripMs": {"median": 650.09, "p95": 710.74},
+      "cleanupCaptureState": "stopped_by_user"
+    },
+    {
+      "description": "On the 500 ms budget build, successful synthetic OCR baseline (28 blocks, one candidate, 439 ms) was followed by the operator enabling the dangerous-page checkbox. Status changed to payment_foreground and the normal summary was cleared. Retained OCR diagnostics belong to the safe baseline, not the dangerous page.",
+      "check": "synthetic_danger_stops_capture",
+      "passed": true,
+      "captureState": "payment_foreground",
+      "summaryNodeCount": 0
+    },
+    {
+      "description": "After fresh manual consent and a second successful synthetic OCR baseline (28 blocks, one candidate, 421 ms), the operator locked the phone. Status changed to screen_locked and the normal summary was cleared. Final cleanup Stop was acknowledged. No locked-screen image or text was exported; low-level resource release was not independently inspected.",
+      "check": "screen_lock_stops_capture",
+      "passed": true,
+      "captureState": "screen_locked",
+      "summaryNodeCount": 0,
+      "cleanupStopAcknowledged": true
+    }
+  ],
+  "status": "Synthetic timing/nonempty Chinese candidates/controlled protected-window stop, real Damai detail-page capture/OCR with 30 warm samples, synthetic dangerous-page stop and screen-lock stop are verified on the phone. Recognition accuracy, selection/buyer/confirmation pages, real Alipay foreground, permission-revocation cases, matched-page comparisons and the full feasibility gate remain unverified."
+}

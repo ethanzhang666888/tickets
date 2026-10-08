@@ -1,11 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
-use tickets::{bilibili, clock, dm, notifications, subscriptions, tasks, utils, version};
+use tickets::{android, bilibili, clock, dm, notifications, subscriptions, tasks, utils, version};
 
 fn main() {
     tauri::Builder::default()
         .manage(tasks::TaskManager::default())
+        .manage(android::AndroidManager::default())
         .setup(|app| {
             let directory = app
                 .path_resolver()
@@ -19,6 +20,8 @@ fn main() {
         })
         .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
+            android::list_android_devices,
+            android::android_request,
             dm::dm_project,
             dm::dm_tickets,
             dm::dm_buyers,
@@ -43,6 +46,14 @@ fn main() {
             version::get_repo_release,
             utils::export_sql_to_txt,
         ])
-        .run(tauri::generate_context!())
-        .expect("无法启动 Tickets");
+        .build(tauri::generate_context!())
+        .expect("无法启动 Tickets")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                tauri::async_runtime::block_on(app.state::<android::AndroidManager>().shutdown());
+            }
+        });
 }

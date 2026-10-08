@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-09",
+  "runCompletedAtUtc": "2026-10-08T17:44:31Z",
+  "scope": "isolated_synthetic_button_only",
+  "device": {"model": "Huawei SEA-AL10", "androidApi": 29},
+  "package": "local.tickets.companion.verification",
+  "test": "TouchBenchmarkDeviceTest.compareDispatchAndConfirmedEffectOnIsolatedButton",
+  "order": "balanced rotating order, each round contains all three methods",
+  "warmupRoundsExcluded": 6,
+  "measuredRounds": 30,
+  "totalConfirmedClicksIncludingWarmups": 108,
+  "clock": "SystemClock.elapsedRealtimeNanos on the phone for dispatch and button handler",
+  "metric": "time from method invocation to own synthetic button OnClickListener entry, not rendered frame or purchase result",
+  "setupAttempts": [
+    {"status": "failed_before_samples", "reason": "existing desktop UIAutomator service already registered; own desktop app gracefully quit and device service cleanup verified"},
+    {"status": "installation_cancelled", "reason": "user cancelled test component install; no test ran; user subsequently requested retry"},
+    {"status": "passed", "tests": 1, "failures": 0}
+  ],
+  "measurements": [
+    {
+      "method": "accessibility_action_click_via_instrumentation",
+      "samples": 30, "successes": 30, "timeouts": 0,
+      "dispatchMs": [3.192708,1.529166,2.319792,3.241146,2.764062,3.288542,2.775,1.470312,2.218229,3.233855,2.00677,1.583334,2.191666,1.450521,2.344792,3.095312,3.1875,1.508854,1.678125,1.519792,1.911979,3.829166,1.497917,1.420834,2.253646,2.423958,2.40625,3.903125,1.494271,1.327083],
+      "effectMs": [1.533854,0.7375,1.302604,1.665625,1.377083,1.48125,1.429167,0.733333,1.444271,1.504688,1.235937,0.860938,1.223958,0.750521,1.027084,1.535416,1.742187,0.819271,0.967188,0.840625,1.263021,2.057291,0.779688,0.78125,1.365625,1.2125,1.208333,1.932813,0.840104,0.735937],
+      "dispatchMedianMs": 2.2359375, "dispatchP95Ms": 3.829166,
+      "effectMedianMs": 1.2299475, "effectP95Ms": 1.932813
+    },
+    {
+      "method": "uiautomation_inject_tap",
+      "samples": 30, "successes": 30, "timeouts": 0,
+      "dispatchMs": [24.834896,26.363541,27.113021,27.00625,21.45,26.7,26.211458,22.907812,28.791146,28.550521,19.344271,31.286979,28.180729,28.989583,27.108333,27.016667,29.811458,30.473959,30.731771,32.411979,29.176562,27.429687,31.096354,31.434896,29.733854,27.285417,28.145833,27.216146,20.645833,31.801042],
+      "effectMs": [27.755209,27.870312,29.996875,36.281771,23.707812,31.461979,28.222396,24.241667,32.302084,36.991667,21.388542,33.232291,30.077083,30.464062,29.877083,29.432292,32.882291,33.171355,32.08125,34.203125,30.779687,29.779687,34.16927,32.876042,31.020833,28.234896,30.171354,28.782292,22.919271,33.058334],
+      "dispatchMedianMs": 27.78776, "dispatchP95Ms": 31.801042,
+      "effectMedianMs": 30.317708, "effectP95Ms": 36.281771
+    },
+    {
+      "method": "shell_input_tap_on_device",
+      "samples": 30, "successes": 30, "timeouts": 0,
+      "dispatchMs": [295.333854,245.588541,234.219792,310.32448,276.527083,314.972917,347.454688,304.120312,268.931771,330.583854,337.645312,315.566146,309.294271,294.798958,280.197395,321.031771,332.049479,317.227604,340.184896,346.633855,296.85,336.142187,300.852083,277.709375,312.894792,294.166667,284.626563,315.475,305.321354,279.136979],
+      "effectMs": [264.403125,232.589062,226.908854,293.194792,263.008333,293.945834,325.488542,276.449999,251.025521,306.826042,308.141146,306.407292,295.195833,280.336458,273.607291,292.398437,306.765625,294.98125,310.299479,328.772917,266.748437,307.02552,274.114583,248.583333,296.5125,276.877604,262.547917,291.485416,294.683854,266.568229],
+      "dispatchMedianMs": 307.3078125, "dispatchP95Ms": 346.633855,
+      "effectMedianMs": 291.9419265, "effectP95Ms": 325.488542
+    }
+  ],
+  "summaryMethod": "median is arithmetic mean of middle two values for n=30; p95 nearest rank. Original instrumentation stream used nearest-rank p50 for fields named Median; this report recomputes conventional median from retained raw samples.",
+  "minitouchMeasured": false,
+  "productionUiAutomator2EndToEndMeasured": false,
+  "normalCompanionPackagePreserved": true,
+  "limitations": [
+    "ACTION_CLICK here runs through instrumentation UiAutomation, not the production accessibility-service connection.",
+    "UiAutomation injection is an Android primitive comparison, not the complete desktop uiautomator2 RPC path.",
+    "Shell input runs on-device via UiAutomation.executeShellCommand; no host USB transport latency is included.",
+    "Effect timestamp measures entry to the synthetic click handler, not frame presentation, platform acceptance, order creation or ticket availability.",
+    "30 samples per method on one synthetic button are exploratory; 30/30 is observed sample success, not a guaranteed reliability rate.",
+    "No conclusion about minitouch relative latency follows from these three other methods."
+  ]
+}

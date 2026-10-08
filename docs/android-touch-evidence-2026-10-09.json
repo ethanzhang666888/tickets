@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-09",
+  "observedAt": "2026-10-08T17:30:46.338645+00:00",
+  "mode": "read_only_metadata_probe_and_source_review",
+  "status": "blocked_for_live_comparison",
+  "liveInjectionAttempted": false,
+  "timingSamples": [],
+  "performanceWinner": null,
+  "source": {
+    "repository": "https://github.com/DeviceFarmer/minitouch",
+    "commit": "0f881ad36cdab6745704c5dc39e2be5453035c4f",
+    "commitDate": "2026-08-16T16:47:54Z",
+    "packageVersion": "1.3.2",
+    "license": "Apache-2.0",
+    "licenseUrl": "https://github.com/DeviceFarmer/minitouch/blob/0f881ad36cdab6745704c5dc39e2be5453035c4f/LICENSE",
+    "readmeUrl": "https://github.com/DeviceFarmer/minitouch/blob/0f881ad36cdab6745704c5dc39e2be5453035c4f/README.md",
+    "sourceUrl": "https://github.com/DeviceFarmer/minitouch/blob/0f881ad36cdab6745704c5dc39e2be5453035c4f/jni/minitouch/minitouch.c",
+    "libevdevCommit": "d447a75e9e23f2286c44859f07b955981e82d483",
+    "libevdevLicenseUrl": "https://github.com/whot/libevdev/blob/d447a75e9e23f2286c44859f07b955981e82d483/COPYING",
+    "libevdevLicenseNote": "Permissive license text and a Linux-header GPLv2 notice; preserve dependency notices, not only minitouch's Apache notice.",
+    "binaryDownloaded": false,
+    "binaryBuilt": false,
+    "binaryExecuted": false,
+    "binarySha256": null,
+    "directPath": "open input device O_RDWR and write input events",
+    "fallbackPath": "connect abstract minitouchagent socket and proxy to STF privileged Android InputManager path",
+    "perCommandAcknowledgement": false,
+    "android10DefaultSecurityWarning": true,
+    "ordinaryApkGrantsShellRights": false
+  },
+  "device": {
+    "manufacturer": "HUAWEI",
+    "model": "SEA-AL10",
+    "release": "10",
+    "sdk": 29,
+    "abi": ["arm64-v8a", "armeabi-v7a", "armeabi"],
+    "buildType": "user",
+    "debuggable": false,
+    "secureProperty": "1",
+    "shellUid": 2000,
+    "shellHasInputGroup": true,
+    "shellContext": "u:r:shell:s0",
+    "selinux": "Enforcing",
+    "physicalWidth": 1080,
+    "physicalHeight": 2340,
+    "surfaceWidth": 1080,
+    "surfaceHeight": 2340,
+    "rotation": 0,
+    "physicalDensity": 480,
+    "overrideDensity": 408
+  },
+  "foreground": {
+    "package": "local.tickets.companion",
+    "activity": "local.tickets.companion.MainActivity",
+    "syntheticFocused": false,
+    "keyguardReported": false
+  },
+  "companion": {
+    "versionName": "0.1.0-feasibility",
+    "versionCode": 1,
+    "minSdk": 29,
+    "targetSdk": 35,
+    "remoteSyntheticClickVerified": false,
+    "sourceInspectedRemoteActions": ["capabilities", "inspect", "native_audit", "status", "stop"],
+    "sourceTestClickLocalOnly": true,
+    "sourceExecutionSupported": false,
+    "sourceSyntheticCounterTextRefreshMs": 500,
+    "pairedLiveCapabilitiesQueried": false
+  },
+  "inputDevices": [
+    {
+      "path": "/dev/input/event4",
+      "name": "input_mt_wrapper",
+      "xRange": [0, 1079],
+      "yRange": [0, 2339],
+      "direct": true,
+      "readableAccessCheck": true,
+      "writableAccessCheck": false,
+      "mode": "crw-rw----",
+      "owner": "root",
+      "group": "input",
+      "selinuxLabel": "u:object_r:input_device:s0",
+      "actualWriteAttempted": false,
+      "actualReadWriteOpenAttempted": false
+    }
+  ],
+  "eventNodeAccessSummary": {
+    "pathsChecked": ["/dev/input/event0", "/dev/input/event1", "/dev/input/event2", "/dev/input/event3", "/dev/input/event4", "/dev/input/event5", "/dev/input/event6"],
+    "allReadChecksPassed": true,
+    "allWriteChecksDenied": true,
+    "method": "shell test -r / test -w; metadata only"
+  },
+  "methods": {
+    "adb_input": {
+      "status": "unmeasured",
+      "commandObserved": true,
+      "commandPath": "/system/bin/input",
+      "safelyScopedLiveAdapterBundled": false,
+      "dispatchMs": null,
+      "confirmedEffectMs": null
+    },
+    "uiautomator": {
+      "status": "unmeasured",
+      "existingServerObserved": true,
+      "serverClass": "com.wetest.uia2.Main",
+      "serverPort": 9008,
+      "sourcePinnedClientVersion": "uiautomator2==3.7.0",
+      "existingServerStartedStoppedOrReconnected": false,
+      "safelyScopedLiveAdapterBundled": false,
+      "dispatchMs": null,
+      "confirmedEffectMs": null
+    },
+    "minitouch": {
+      "status": "blocked",
+      "processObserved": false,
+      "binaryObservedAtKnownPaths": false,
+      "knownPathsChecked": ["/data/local/tmp/minitouch", "/data/local/tmp/minitouch-nopie"],
+      "socketObserved": false,
+      "stfAgentSocketObserved": false,
+      "stfPackageObserved": false,
+      "runtimeVerified": false,
+      "safelyScopedLiveAdapterBundled": false,
+      "dispatchMs": null,
+      "confirmedEffectMs": null,
+      "reasons": [
+        "upstream_android_10_default_security_policy_warning",
+        "touch_device_write_access_check_denied",
+        "minitouch_absent_at_known_paths",
+        "stf_package_and_agent_socket_not_observed",
+        "no_scoped_remote_synthetic_dispatcher",
+        "runtime_injection_not_attempted"
+      ]
+    }
+  },
+  "queryFailures": [],
+  "benchmarkCore": {
+    "liveAdaptersBundled": false,
+    "evidenceKind": "offline_control_flow_and_statistics_only",
+    "defaultWarmupsPerMethod": 3,
+    "defaultMeasuredTrialsPerMethod": 30,
+    "defaultSeed": 20261009,
+    "order": "seeded random permutation of available methods in each round",
+    "p95": "nearest rank",
+    "effect": "fresh unique synthetic target handler counter increment by exactly one",
+    "abortWithoutRetry": true,
+    "dispatchAndEffectSeparated": true,
+    "globalInjectionForegroundRaceSolved": false,
+    "fixtureTimingsAreDeviceMeasurements": false
+  },
+  "limitations": [
+    "Access checks do not establish actual O_RDWR or write failure; no specific SELinux rule was proven.",
+    "Known-path absence is not an exhaustive filesystem search.",
+    "Source API inspection is not a live authenticated companion capability exchange.",
+    "No measured backend latency, confirmed device touch, rendered frame latency, or purchase success evidence exists.",
+    "Pure external foreground checks cannot atomically constrain global coordinate injections.",
+    "STF-backed minitouch requires a privileged ADB-launched process, not merely an ordinary APK wrapper."
+  ],
+  "recommendedDecision": "Retain the existing available path provisionally. Keep minitouch preference conditional on authorized provisioning, scoped synthetic success, and comparative confirmed-effect evidence; do not select by dispatch-only timing."
+}

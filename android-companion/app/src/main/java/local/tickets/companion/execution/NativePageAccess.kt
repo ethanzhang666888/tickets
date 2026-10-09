@@ -8,75 +8,89 @@ import local.tickets.companion.Safety
 import local.tickets.companion.Session
 import local.tickets.companion.pages.*
 
-/** Owns/recycles Android handles. Private text never leaves the process or enters telemetry. */
-@Suppress("DEPRECATION")
-internal class NativeFrame(
-    val snapshot: NodeSnapshot,
-    val specs: List<NodeSpec>,
-    val windowId: Int,
-    val startedAt: Long,
-    private val nodes: List<AccessibilityNodeInfo>,
-) : AutoCloseable {
-    fun samePage(other: NativeFrame) = windowId == other.windowId && specs == other.specs
-    fun click(index: Int): Boolean {
-        val node = nodes.getOrNull(index) ?: return false
-        if (!node.refresh() || node.packageName?.toString() != Safety.DAMAI || !node.isVisibleToUser || !node.isEnabled || !node.isClickable) return false
-        val bounds = Rect().also(node::getBoundsInScreen)
-        val expected = specs[index]
-        if (node.viewIdResourceName.orEmpty() != expected.resourceId || node.text?.toString().orEmpty() != expected.text ||
-            NodeBounds(bounds.left, bounds.top, bounds.right, bounds.bottom) != expected.bounds) return false
-        return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-    }
-    override fun close() { nodes.forEach { it.recycle() } }
-}
-
 internal object NativePageAccess {
     @Suppress("DEPRECATION")
-    fun read(service: InspectorAccessibilityService, captureId: Long, stillActive: () -> Boolean): NativeFrame? {
-        if (!stillActive() || Session.locked(service) || Session.accessibility !== service) return null
+    fun read(service: InspectorAccessibilityService, captureId: Long,
+             onFailure: (NativeReadFailure) -> Unit = {}, stillActive: () -> Boolean): NativeFrame? {
+        fun rejected(reason: NativeReadFailure): NativeFrame? { onFailure(reason); return null }
+        if (!stillActive()) return rejected(NativeReadFailure.CANCELLED)
+        if (Session.locked(service)) return rejected(NativeReadFailure.LOCKED)
+        if (Session.accessibility !== service) return rejected(NativeReadFailure.SERVICE_LOST)
         val started = SystemClock.elapsedRealtime()
-        val root = service.rootInActiveWindow ?: return null
+        val root = try { service.rootInActiveWindow } catch (_: RuntimeException) { return rejected(NativeReadFailure.PLATFORM_ERROR) }
+            ?: return rejected(NativeReadFailure.ROOT_UNAVAILABLE)
         val windowId = root.windowId
         val owned = ArrayList<AccessibilityNodeInfo>()
         val specs = ArrayList<NodeSpec>()
         var characters = 0
-        var complete = true
+        var failure: NativeReadFailure? = null
         var transferred = false
+        fun invalidate(reason: NativeReadFailure) { if (failure == null) failure = reason }
         fun visit(node: AccessibilityNodeInfo, parent: Int?, depth: Int) {
             owned += node
-            if (!complete || !stillActive() || depth > NodeSnapshot.MAX_DEPTH || specs.size >= NodeSnapshot.MAX_NODES ||
-                SystemClock.elapsedRealtime() - started > 500 || node.isPassword) { complete = false; return }
-            if (node.packageName?.toString() != Safety.DAMAI) { complete = false; return }
+            if (failure != null) return
+            if (!stillActive()) { invalidate(NativeReadFailure.CANCELLED); return }
+            if (node.packageName?.toString() != Safety.DAMAI) { invalidate(NativeReadFailure.FOREIGN_PACKAGE); return }
+            if (node.isPassword) { invalidate(NativeReadFailure.PASSWORD_FIELD); return }
+            if (depth > NodeSnapshot.MAX_DEPTH || specs.size >= NodeSnapshot.MAX_NODES) { invalidate(NativeReadFailure.SNAPSHOT_LIMIT); return }
+            if (SystemClock.elapsedRealtime() - started > 500) { invalidate(NativeReadFailure.READ_TIMEOUT); return }
             val rect = Rect().also(node::getBoundsInScreen)
             val text = node.text?.toString().orEmpty()
             val description = node.contentDescription?.toString().orEmpty()
             val id = node.viewIdResourceName.orEmpty()
-            if (listOf(text, description, id).any { it.length > NodeSnapshot.MAX_TEXT_LENGTH }) { complete = false; return }
+            if (listOf(text, description, id).any { it.length > NodeSnapshot.MAX_TEXT_LENGTH }) { invalidate(NativeReadFailure.SNAPSHOT_LIMIT); return }
             characters += text.length + description.length + id.length + Safety.DAMAI.length
-            if (characters > NodeSnapshot.MAX_TOTAL_CHARACTERS) { complete = false; return }
+            if (characters > NodeSnapshot.MAX_TOTAL_CHARACTERS) { invalidate(NativeReadFailure.SNAPSHOT_LIMIT); return }
             val index = specs.size
             specs += NodeSpec(parent, Safety.DAMAI, id, text, description, node.isVisibleToUser,
                 node.isEnabled, node.isClickable, if (node.isCheckable) node.isChecked else null,
                 node.isSelected, NodeBounds(rect.left, rect.top, rect.right, rect.bottom), node.isScrollable)
-            if (node.childCount > NodeSnapshot.MAX_NODES) { complete = false; return }
+            if (node.childCount > NodeSnapshot.MAX_NODES) { invalidate(NativeReadFailure.SNAPSHOT_LIMIT); return }
             for (i in 0 until node.childCount) {
-                if (!complete) break
+                if (failure != null) break
                 val child = node.getChild(i)
-                if (child == null) { complete = false; break }
+                if (child == null) { invalidate(NativeReadFailure.TREE_CHANGED); break }
                 visit(child, index, depth + 1)
             }
         }
         try {
             visit(root, null, 1)
-            if (!complete || !stillActive() || Session.locked(service) || SystemClock.elapsedRealtime() - started > 500) return null
-            val current = service.rootInActiveWindow ?: return null
-            val matches = try { current.packageName?.toString() == Safety.DAMAI && current.windowId == windowId } finally { current.recycle() }
-            if (!matches || !windowsMatch(service, windowId)) return null
-            val frame = NativeFrame(NodeSnapshot.create(captureId, specs, true), specs, windowId, started, owned)
+            if (failure != null) return null
+            if (!stillActive()) { invalidate(NativeReadFailure.CANCELLED); return null }
+            if (Session.accessibility !== service) { invalidate(NativeReadFailure.SERVICE_LOST); return null }
+            if (Session.locked(service)) { invalidate(NativeReadFailure.LOCKED); return null }
+            if (SystemClock.elapsedRealtime() - started > 500) { invalidate(NativeReadFailure.READ_TIMEOUT); return null }
+            val current = service.rootInActiveWindow ?: run { invalidate(NativeReadFailure.ROOT_UNAVAILABLE); return null }
+            try {
+                if (current.packageName?.toString() != Safety.DAMAI) { invalidate(NativeReadFailure.FOREIGN_PACKAGE); return null }
+                if (current.windowId != windowId) { invalidate(NativeReadFailure.WINDOW_UNAVAILABLE); return null }
+            } finally { current.recycle() }
+            if (!windowsMatch(service, windowId)) { invalidate(NativeReadFailure.WINDOW_UNAVAILABLE); return null }
+            if (!stillActive()) { invalidate(NativeReadFailure.CANCELLED); return null }
+            if (SystemClock.elapsedRealtime() - started > 500) { invalidate(NativeReadFailure.READ_TIMEOUT); return null }
+            val snapshot = try { NodeSnapshot.create(captureId, specs, true) } catch (_: IllegalArgumentException) {
+                invalidate(NativeReadFailure.INVALID_SNAPSHOT); return null
+            }
+            val frame = NativeFrame(snapshot, specs, windowId, started, owned)
             transferred = true
             return frame
-        } catch (_: RuntimeException) { return null }
-        finally { if (!transferred) owned.forEach { it.recycle() } }
+        } catch (_: RuntimeException) { invalidate(NativeReadFailure.PLATFORM_ERROR); return null }
+        finally {
+            if (!transferred) {
+                owned.forEach { it.recycle() }
+                onFailure(failure ?: NativeReadFailure.PLATFORM_ERROR)
+            }
+        }
+    }
+
+    /** Foreground/window metadata only; no traversal or text access for a different package. */
+    @Suppress("DEPRECATION")
+    fun foregroundMatches(service: InspectorAccessibilityService, windowId: Int): Boolean {
+        if (Session.accessibility !== service) return false
+        val root = service.rootInActiveWindow ?: return false
+        val matches = try { root.packageName?.toString() == Safety.DAMAI && root.windowId == windowId }
+            finally { root.recycle() }
+        return matches && windowsMatch(service, windowId)
     }
 
     @Suppress("DEPRECATION")

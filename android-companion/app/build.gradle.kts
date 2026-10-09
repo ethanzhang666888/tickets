@@ -3,6 +3,20 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val usbSharedSources = tasks.register<Sync>("syncUsbSharedSources") {
+    // Share the checked decision/observation primitives, not normal-app activities or services.
+    from("src/main/java") {
+        include("local/tickets/companion/pages/**", "local/tickets/companion/policy/**", "local/tickets/companion/usb/**")
+        include("local/tickets/companion/Safety.kt", "local/tickets/companion/NodeScanBudget.kt",
+            "local/tickets/companion/PickerCaptureEvidence.kt", "local/tickets/companion/DamaiLaunchIntent.kt")
+        include(listOf("LocalExecution", "NativeOrderReview", "NativeFrame", "NativeReadFailure", "LocalDispatchGuard",
+            "ScopedTouchTarget", "ExecutionVisualSelection", "VisualDispatchEvidence").map {
+            "local/tickets/companion/execution/$it.kt"
+        })
+    }
+    into(layout.buildDirectory.dir("generated/usb-shared"))
+}
+
 android {
     namespace = "local.tickets.companion"
     compileSdk = 35
@@ -23,8 +37,25 @@ android {
             applicationIdSuffix = ".verification"
             matchingFallbacks += "debug"
         }
+        create("usbExecution") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".usb"
+            versionNameSuffix = "-usb"
+            isDebuggable = false
+            matchingFallbacks += "debug"
+        }
     }
     testBuildType = "verification"
+    sourceSets {
+        getByName("main").java.setSrcDirs(emptyList<String>())
+        getByName("main").manifest.srcFile("src/common/AndroidManifest.xml")
+        getByName("debug").java.srcDir("src/main/java")
+        getByName("debug").manifest.srcFile("src/main/AndroidManifest.xml")
+        getByName("release").java.srcDir("src/main/java")
+        getByName("release").manifest.srcFile("src/main/AndroidManifest.xml")
+        getByName("verification").java.srcDir("src/main/java")
+        getByName("usbExecution").java.srcDir(usbSharedSources.map { it.destinationDir })
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -32,6 +63,10 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { buildConfig = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+}
+
+tasks.configureEach {
+    if (name == "preUsbExecutionBuild" || (name.startsWith("lint") && name.contains("UsbExecution"))) dependsOn(usbSharedSources)
 }
 
 dependencies {

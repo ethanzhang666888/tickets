@@ -1,0 +1,462 @@
+{
+  "date": "2026-10-09",
+  "scope": "authorized ordinary-sale workflow through order and saved-attendee verification; no order submission or payment",
+  "overall_phone_business_passed": false,
+  "assisted_phone_order_and_attendee_review_passed": true,
+  "usb_programmatic_detail_to_order_passed": true,
+  "overall_scope_note": "The fully programmatic USB-started isolated flow now passed from event detail through default-attendee verification with zero user clicks during that run. Normal standalone APK automation remains unaccepted; its ordinary accessibility backend has not been replaced by the tested explicit-finger input capability.",
+  "target": {
+    "event": "Ella陈嘉桦郑州站",
+    "session": "2026-11-07 19:00",
+    "tier": "内场880元",
+    "quantity": 1,
+    "buyers": "default_first_saved_attendee"
+  },
+  "desktop_real_flow": {
+    "passed": true,
+    "backend": "production Python Driver over USB, historical run only",
+    "endpoint": "confirmation with exactly one saved attendee selected",
+    "prepare_ms": 1040.4,
+    "execution_ms": 1786.4,
+    "execution_first_action_ms": 487.7,
+    "prepare_actions": 1,
+    "execution_actions": 2,
+    "submit_and_payment_actions_additionally_blocked_by_test": true,
+    "real_order_submitted": false,
+    "payment_performed": false,
+    "limitations": "One ordinary in-stock run; not phone-local, sale-time load or success-rate evidence. Not rerun during this follow-up."
+  },
+  "phone_native_structure": {
+    "device": "Huawei SEA-AL10 / API29 / HarmonyOS4",
+    "damai_version": "9.0.35",
+    "initial_picker_nodes_without_include_unimportant": 33,
+    "initial_picker_nodes_with_include_unimportant": 116,
+    "selected_picker_nodes_without_include_unimportant": 40,
+    "selected_picker_nodes_with_include_unimportant": 128,
+    "cards": 6,
+    "initial_and_selected_capture_ownership_device_checks_passed": true,
+    "native_selected_flags": 0,
+    "full_local_visual_execution_verified": false,
+    "full_local_buyer_execution_verified": false,
+    "remaining_device_gate": "Explicit TOOL_TYPE_FINGER standard input succeeded for picker opening, tier selection and NEXT in the isolated USB-started runner. Matched TOOL_TYPE_UNKNOWN contact did not select the tier. The normal APK still uses ordinary accessibility actions/gestures; integration of the proven input capability and standalone startup remain unverified. Ordinary consent can be operated by the assistant."
+  },
+  "ordinary_system_consent": {
+    "assistant_approval_passed": true,
+    "method": "Verified own app screen-reading prompt in Huawei SystemUI; clicked normal Allow control",
+    "normal_capture_reached_ready": true,
+    "accessibility_capabilities_after_reinstallation": 33,
+    "accessibility_rebound_by_normal_install": true,
+    "settings_toggle_performed": false,
+    "root_appops_permission_database_or_security_bypass": false,
+    "production_runtime_auto_regrant": false
+  },
+  "phone_local_attempt": {
+    "passed": false,
+    "reason": "unsupported_or_blocked_page",
+    "actions": 0,
+    "visual_ms": 0,
+    "captured_frames": 0,
+    "ocr_started": false,
+    "diagnosis": "Launch intent lacked RESET_TASK_IF_NEEDED, creating a splash activity above the prepared picker; this attempt never reached OCR.",
+    "fix": "Launcher-style NEW_TASK plus RESET_TASK_IF_NEEDED; no task clearing or invented product routes",
+    "launch_regression": {
+      "device_tests_passed": 2,
+      "missing_flag_assertion_failed_before_fix": true,
+      "actual_authorized_search_window_preserved_after_app_round_trip": true
+    }
+  },
+  "phone_local_ocr_attempt_after_launcher_fix": {
+    "passed": false,
+    "reason": "unsupported_or_blocked_page",
+    "page_kind": "PICKER",
+    "page_blockers": ["UNSUPPORTED_OPTIONS"],
+    "actions": 0,
+    "read_ms": 40,
+    "visual_ms": 480,
+    "captured_frames": 1,
+    "ocr_started": true,
+    "capture_state": "ready",
+    "diagnosis": "OCR merged the native presale badge into the session date/time; subsequently addressed with same-card native corroboration."
+  },
+  "picker_followup": {
+    "isolated_ocr_parsing_passed": true,
+    "session_count": 1,
+    "tier_count": 5,
+    "parser_blockers": [],
+    "test_screenshot_backend": "UiAutomation after strict public-page ownership; not production MediaProjection",
+    "fixes": [
+      "Remove only a trailing presale badge corroborated by native text in the same session card.",
+      "Normalize only exact measured inner-floor tier spellings; price and identity remain strict.",
+      "Allow only the immediate anonymous clickable wrapper owning one card under the known options container."
+    ],
+    "native_action_click_accepted": true,
+    "native_selection_effect_verified": false,
+    "explicit_selection_assertion": "Failed: expected one selected 880-yuan tier, observed zero. No NEXT dispatched.",
+    "historical_touch_experiment": "Zero-duration injected tap had no selection effect. An 80ms tap was accepted but immediate OCR timed out; subsequent read-only inspection still found no selection. Removed experimental tier shell branch.",
+    "normal_native_attempt": {
+      "passed": false,
+      "reason": "action_effect_unconfirmed",
+      "read_ms": 39,
+      "visual_ms": 553,
+      "dispatch_ms": 4,
+      "first_action_ms": 2705,
+      "actions": 1,
+      "captured_frames": 1,
+      "capture_state": "ready"
+    }
+  },
+  "scoped_touch_runtime": {
+    "allowed_actions": ["OPEN_PICKER", "SESSION", "TIER"],
+    "native_click_then_touch_retry": false,
+    "next_and_buyer_actions_native_only": true,
+    "actual_effect_required": true,
+    "review_fixes": ["Reject overlapping unrelated clickable targets", "Reject invalid anonymous wrappers instead of falling back to native click"],
+    "normal_detail_attempt": {
+      "passed": false,
+      "active": false,
+      "reason": "action_effect_unconfirmed",
+      "read_ms": 36,
+      "visual_ms": 828,
+      "dispatch_ms": 1,
+      "first_action_ms": 2985,
+      "actions": 1,
+      "last_action": "OPEN_PICKER",
+      "last_dispatch": "scoped_touch",
+      "gesture_result": "completed",
+      "page_kind": "DETAIL",
+      "page_blockers": [],
+      "capture_state": "ready",
+      "captured_frames": 1,
+      "rejected_frames": 0,
+      "max_frame_clock_behind_ms": 1069160,
+      "ocr_started": true
+    }
+  },
+  "detail_followup": {
+    "native_back_to_existing_search_passed": true,
+    "verified_ella_tour_zhengzhou_row_reentry_passed": true,
+    "bounded_detail_scroll_adaptation": "Measured galleries only; full visible title and fixed purchase control outside scrolling subtrees and geometry",
+    "visual_comparison_exclusions": "Verified detail pulse and reserved status spacer only; all safety words remain checked and all other text/geometry/selection evidence remains strict",
+    "refreshed_normal_attempt": {
+      "passed": false,
+      "reason": "preclick_visual_changed",
+      "actions": 0,
+      "diagnosis": "OCR text or geometry outside allowed non-target regions differed; did not broaden comparison to force progress."
+    },
+    "normal_stop_capture_control_passed": true,
+    "standard_touch_with_capture_stopped_opened_picker": false,
+    "detached_instrumentation_control": {
+      "read_only_exact_event_and_touch_target_proof_passed": true,
+      "instrumentation_disconnected_before_touch": true,
+      "foreground_rechecked": "Damai ProjectDetailActivity",
+      "host_ms_from_proof_output_to_pre_dispatch_check": 88,
+      "verified_center": [661, 2259],
+      "standard_touch_exit_code": 0,
+      "subsequent_picker_inspection_passed": false,
+      "conclusion": "No picker effect verified even outside the isolated test connection. Does not establish why the app did not advance."
+    },
+    "security_or_anti_automation_block_proven": false
+  },
+  "test_environment": {
+    "isolation_package": "local.tickets.companion.verification",
+    "dont_suppress_accessibility_services": true,
+    "verification_manifest_checked": true,
+    "verification_internet_permission": false,
+    "verification_production_services": false,
+    "verification_foreground_service_permission": false,
+    "huawei_instrumentation_freezes_observed": true,
+    "freeze_handling": "Bounded supervision and diagnostic SIGQUIT only to own disposable test process; timed-out tests force-stopped only in isolation package.",
+    "instrumentation_wall_time_is_not_business_latency": true
+  },
+  "current_host_verification": {
+    "android_jvm_tests_passed": 181,
+    "android_debug_apk_build": "passed",
+    "android_verification_apk_build": "passed",
+    "android_verification_test_apk_build": "passed",
+    "android_lint_errors": 0,
+    "android_lint_warnings": 7,
+    "diff_check": "passed",
+    "review": "Independent scoped reviews identified read-timing, auxiliary-verification and public-touch final-guard issues. Corrections were self-reviewed and verified with JVM checks, five fake-input device fault tests, and a repeated guarded detail-to-order device flow. Normal APK standalone execution remains unaccepted.",
+    "historical_unchanged_stack_only": {
+      "python_tests_passed": 182,
+      "javascript_tests_passed": 87,
+      "frontend_production_build": "passed",
+      "rust_tests_passed": 63,
+      "rust_exit_code": 0,
+      "rust_nonfatal_output": "Cached plugin template package-name diagnostic and existing future-incompatibility warning"
+    }
+  },
+  "installed": {
+    "package": "local.tickets.companion",
+    "version": "0.2.0-local-preview",
+    "method": "adb install -r, existing data preserved; final normal, isolated target and isolated test APKs installed",
+    "latest_readiness_check_passed": true,
+    "accessibility_connected": true,
+    "capture_state": "not_granted",
+    "error": "none",
+    "active_purchase_task": false,
+    "phase": "idle",
+    "actions": 0,
+    "ocr_started": false,
+    "scope_note": "Current post-installation idle counters do not replace historical failed-run metrics. Consent can be approved autonomously through normal system UI when another justified run is needed."
+  },
+  "privacy": {
+    "production_images_saved_or_exported": false,
+    "temporary_diagnostic_public_picker_and_settings_crops_displayed": true,
+    "temporary_images_owned_browser_tabs_and_one_shot_servers_cleaned": true,
+    "attendee_order_or_credential_images_exported": false,
+    "diagnostics": "Bounded category, geometry, text-length and exact public-event metadata; no attendee identity or credential export"
+  },
+  "followup_after_user_manual_open_1335": {
+    "user_reported_manual_purchase_button_opened_picker": true,
+    "read_only_picker_verification_passed": true,
+    "picker_nodes": 116,
+    "sessions": 1,
+    "tiers": 5,
+    "selected_tiers_before_run": 0,
+    "ordinary_screen_consent_approved_by_assistant": true,
+    "normal_runtime_attempt": {
+      "passed": false,
+      "reason": "action_effect_unconfirmed",
+      "read_ms": 33,
+      "visual_ms": 468,
+      "dispatch_ms": 2,
+      "first_action_ms": 2667,
+      "actions": 1,
+      "last_action": "TIER",
+      "last_dispatch": "scoped_touch",
+      "gesture_result": "completed",
+      "page_kind": "PICKER",
+      "page_blockers": [],
+      "active_after_run": false,
+      "next_dispatched": false
+    },
+    "current_synthetic_input_control": {
+      "passed": true,
+      "measured_samples_per_method": 30,
+      "native_click_confirmed_effects": 30,
+      "uiautomation_tap_confirmed_effects": 30,
+      "shell_tap_confirmed_effects": 30,
+      "scope": "Own isolated synthetic button only; does not establish Damai behavior"
+    },
+    "120ms_standard_contact_control": {
+      "target": "Verified authorized 880-yuan tier only",
+      "selection_verified": false,
+      "selected_tiers_on_followup_inspection": 0,
+      "next_dispatched": false,
+      "temporary_control_branch_removed": true
+    },
+    "capture_stopped_on_isolated_activity_transition": true,
+    "conclusion": "Manual detail entry works; current programmatic tier selection still lacks effect. Generic input pipeline works on the isolated control, but application-specific cause remains unresolved."
+  },
+  "followup_after_manual_tier_selection_1342": {
+    "initial_read_only_selection_check_passed": true,
+    "initial_nodes": 128,
+    "initial_selected_tier": "内场880元",
+    "initial_quantity": 1,
+    "normal_consent_approved_by_assistant": true,
+    "business_harness_hit_host_bound": true,
+    "subsequent_normal_status": {
+      "active": false,
+      "reason": "action_effect_unconfirmed",
+      "last_action": "TIER",
+      "last_dispatch": "scoped_touch",
+      "gesture_result": "completed",
+      "read_ms": 27,
+      "visual_ms": 486,
+      "dispatch_ms": 1,
+      "first_action_ms": 2766,
+      "actions": 1
+    },
+    "subsequent_read_only_selection_check_passed": false,
+    "subsequent_nodes": 116,
+    "subsequent_selected_tiers": 0,
+    "conclusion": "Manual selection was positively verified before consent/task handoff, but absent afterward. Exact point and cause of loss are not yet isolated; no NEXT or confirmation success established.",
+    "synthetic_coordinate_control": {
+      "passed": true,
+      "measured_samples_per_method": 30,
+      "injected_and_received_coordinates_match": true,
+      "first_touch_expected": [540, 377],
+      "first_touch_received": [540, 377],
+      "scope": "Own isolated synthetic activity, not Damai coordinates"
+    },
+    "picker_action_metadata": "Card leaves advertise no click; immediate anonymous wrappers advertise click; no touch delegate regions reported. No undocumented action invoked.",
+    "bounded_manual_staging_test": "Optional test argument schedules the already-authorized normal task 0..120 seconds ahead, so a manual selection can be observed without another pre-execution app switch. Not a production fix or automatic selection proof."
+  },
+  "followup_current_selected_picker_1411": {
+    "previous_scheduled_attempt": {
+      "scheduled_start_beijing": "13:53:33",
+      "host_test_stopped_beijing": "13:54:52",
+      "completed": false,
+      "reason": "isolated harness host bound; no business success evidence",
+      "expired_attempt_not_reused": true,
+      "temporary_manual_staging_argument_removed": true
+    },
+    "current_exact_880_yuan_quantity_one_check_passed": true,
+    "assisted_continuation_scope": "Explicit isolated verification of already manually selected tickets without application switching; not normal-app full automation acceptance",
+    "initial_continuation": {
+      "reason": "preclick_visual_changed",
+      "actions": 0,
+      "selection_map_unchanged": true,
+      "observed_difference": "System-status OCR changed; native NEXT label OCR bounds jittered by 1..4 pixels while the native control remained unchanged"
+    },
+    "bounded_visual_fix": {
+      "regression_failed_before_fix": true,
+      "regression_passed_after_fix": true,
+      "picker_status_region": "Unique invisible empty noninteractive title_bar_space; exact strict picker topology; full-width top spacer <=10% of root height and outside identity, cards and NEXT",
+      "next_label_tolerance": "Single identical allowed label wholly inside the same native btn_buy_view under bottom_layout; <=4 pixels per OCR edge only",
+      "strict_unchanged_guards": "Native tree/window/control bounds, ticket text/geometry/selection, all other OCR, quantity, target identity, budget, freshness and full-frame risk/payment markers",
+      "normal_apk_updated_without_opening_configuration_ui": true
+    },
+    "continuation_after_fix": {
+      "visual_guard_passed_on_device": true,
+      "native_next_accepted": true,
+      "native_actions_known_from_stage": 1,
+      "last_reported_stage": "waiting_native_confirmation",
+      "isolated_host_bound_reached": true,
+      "isolated_process_stopped": true,
+      "subsequent_foreground": "Damai NcovSkuActivity (picker)",
+      "subsequent_selected_880_yuan_quantity_one_check_passed": true,
+      "confirmation_or_attendee_verification_passed": false,
+      "screenshots_after_next_in_continuation": 0,
+      "submission_or_payment_performed": false
+    },
+    "final_phone_state": "Normal APK updated; no auto-resume; isolated test ended; projection absent; authorized 880-yuan tier and quantity one remain selected on picker. No live scheduled attempt.",
+    "review": "Focused self-review of bounded visual exclusions and native-only assisted continuation; no new independent review"
+  },
+  "assisted_order_review_after_user_next_1436": {
+    "user_manually_entered_order_page": true,
+    "foreground": "Damai DmOrderActivity",
+    "screenshots": 0,
+    "event_matches_authorized_target": true,
+    "session_matches_2026_11_07_1900": true,
+    "unit_price_cents": 88000,
+    "quantity": 1,
+    "total_cents": 88000,
+    "saved_attendee_count": 3,
+    "initial_selected_attendee_count": 0,
+    "authorized_default_buyer_action": {
+      "kind": "native checkbox click on verified first saved attendee only",
+      "attempts": 1,
+      "accepted": true,
+      "immediate_post_click_read": "Snapshot unavailable during transition; action test failed and was not repeated",
+      "immediate_failure_report_selection_counts": "Pre-click observation only, not proof that the action had no effect"
+    },
+    "separate_read_only_followup": {
+      "passed": true,
+      "reason": "assisted_native_order_review_verified",
+      "selected_attendee_count": 1,
+      "default_first_attendee_selected": true,
+      "additional_buyer_change_required": false,
+      "two_native_snapshots_agreed": true,
+      "native_actions": 0,
+      "screenshots": 0
+    },
+    "full_tier_identity": "Inner-floor 880-yuan selection was verified on the preceding picker; order page independently exposes price only, not full tier identity",
+    "fees": "Separate fee structure unsupported; observed total exactly equals 880-yuan unit price times one",
+    "phone_assisted_order_and_attendee_review_passed": true,
+    "normal_app_full_automation_passed": false,
+    "manual_steps": ["Open picker", "Select inner-floor 880-yuan tier", "Enter order page"],
+    "assistant_steps": ["Read and verify authorized selection", "Native click of default first saved attendee checkbox", "Read-only final order and attendee verification"],
+    "final_page": "Order confirmation; no further action",
+    "submission_performed": false,
+    "payment_performed": false,
+    "attendee_identity_exported": false
+  },
+  "programmatic_followup_after_1514": {
+    "manual_actions_during_final_flow": 0,
+    "normal_app_standalone_accepted": false,
+    "backend": "Isolated verification APKs started over authorized USB ADB; UiAutomation FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES; explicit public-control finger contacts and native attendee checkbox",
+    "matched_tool_type_control": {
+      "same_verified_center": [613, 1039],
+      "contact_duration_ms": 60,
+      "all_other_explicit_event_parameters_equal": true,
+      "unknown_tool_selected_tiers_after": 0,
+      "finger_tool_selected_tiers_after": 1,
+      "finger_selected_tier": "内场880元",
+      "quantity_after_finger": 1,
+      "device_id": 0,
+      "hardware_identity_spoofing_or_security_setting_change": false,
+      "platform_reference": "AOSP android-10.0.0_r1 MotionEventInjector.obtainMotionEvent uses TOOL_TYPE_UNKNOWN",
+      "reference_url": "https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android-10.0.0_r1/services/accessibility/java/com/android/server/accessibility/MotionEventInjector.java",
+      "limits": "Proves this device/app's observed response to the tool-type difference, not the vendor's internal reason or a security-block mechanism. Public GestureDescription has no tool-type option."
+    },
+    "failed_native_wrapper_control": {
+      "action_click_accepted": true,
+      "view_clicked_events": 1,
+      "content_or_window_change_events": 0,
+      "toast_categories": [],
+      "selection_effect": false
+    },
+    "navigation_state_evidence": {
+      "verified_order_native_back_passed": true,
+      "back_to_picker_cleared_tier_selection": true,
+      "selected_state_round_trip": "Not accepted: first run reached own-app round trip but immediate screenshot was unavailable; a later attempt started with selection already absent. No clean stable before/after preservation proof.",
+      "null_screenshot_control": "Test retries a null capture for <=1s, revalidating exact public ownership before each attempt; never captures order pages."
+    },
+    "native_observation_fixes": {
+      "failure_classification": "Transient root/child/window absence versus cancellation, lock, foreign package, password field, limits, invalid snapshot and platform error",
+      "post_dispatch_read_only_settling_ms": 500,
+      "retry_clicks": false,
+      "read_timeout_retryable": false,
+      "deadline_and_stop_still_terminal": true,
+      "duplicate_action_dispatched_call_rejected": true,
+      "visual_timestamp_recorded_before_native_validation": true,
+      "action_acceptance_tests_require_final_verified_result": true
+    },
+    "loading_transition": {
+      "observed_before_fix": "UNKNOWN with only UNKNOWN_PAGE; five native nodes, zero visible text nodes; only android:id/content and cn.damai:id/classics_arrow are named",
+      "fix": "Recognize only the complete five-node same-package textless, descriptionless, noninteractive/nonselected shell with one root and anchored content/arrow ancestry as LOADING; existing bounded waiting applies, never a click or screenshot target",
+      "negative_regressions": "Extra nodes, other IDs, text/description, foreign package, clickable/scrollable/checked/selected state and malformed ancestry remain rejected; risk/cashier markers retain priority"
+    },
+    "final_device_sequence": [
+      "Verified order -> native back -> authorized picker: passed",
+      "Authorized picker -> native back -> exact event detail: passed",
+      "Explicit finger OPEN_PICKER: actual picker opening verified",
+      "Explicit finger TIER: unique 880-yuan tier and quantity one verified",
+      "Double visual/native guard -> explicit finger NEXT -> native loading wait -> confirmation -> native first-attendee checkbox -> verified terminal state: passed"
+    ],
+    "continuation_result": {
+      "completed": true,
+      "reason": "confirmation_verified_manual_submit",
+      "actions": 2,
+      "native_actions": 1,
+      "next_dispatch": "standard_finger",
+      "screenshots_after_next": 0,
+      "submission_performed": false,
+      "payment_performed": false
+    },
+    "verified_target": "Ella Zhengzhou, 2026-11-07 19:00, inner-floor 880 yuan x1; final total 880 yuan; exactly the first saved attendee selected",
+    "final_guarded_reverification": {
+      "open_and_tier_final_guard": "Same baseline/current window and display signature; unlocked foreground; refreshed target properties; active/focused window match; visual age <=2s; native read age <=500ms; guarded dispatch shared by native/UNKNOWN/FINGER controls",
+      "native_tier_action_requires_explicit_public_navigation_opt_in": true,
+      "return_navigation_requires_final_navigation_assertion": true,
+      "failed_contact_cleanup": "Rejected/throwing DOWN or interrupted contact sends best-effort CANCEL, never UP; rejected UP is not retried; original exceptions are preserved",
+      "fake_input_fault_tests_failed_before_fix": 4,
+      "fake_input_fault_tests_passed_after_fix": 5,
+      "fake_input_tests_performed_real_touches": false,
+      "real_name_notice_during_repeat": "Public dialog interrupted ownership verification; only its identified cancel button labelled 知道了 was clicked. The confirmation/real-name action was not clicked; no identity information or verification setting was changed.",
+      "final_open_picker_passed": true,
+      "final_finger_tier_passed": true,
+      "final_continuation_passed": true,
+      "final_read_only_order_review_passed": true,
+      "final_selected_attendee_count": 1,
+      "final_default_first_selected": true,
+      "final_total_cents": 88000,
+      "final_phone_page": "DmOrderActivity order confirmation",
+      "order_screenshots": 0,
+      "submission_or_payment_performed": false
+    },
+    "remaining_delivery_boundary": "Successful isolated USB-run capability is not yet a normal-app input backend. No privileged execution broker, new security permissions, automatic re-grant or production test-hook endpoint was added."
+  },
+  "real_order_submitted": false,
+  "payment_performed": false,
+  "not_accepted_as_complete": [
+    "Normal standalone APK integration of the proven input capability (separate fully programmatic USB-started flow passed)",
+    "Standalone startup, any additional execution authorization and disconnect/restart behavior of a future backend",
+    "Real-device lifecycle acceptance",
+    "Phone automatic submission and cross-controller submission exclusion",
+    "Verified active stock refresh",
+    "Long-duration and sale-time acceptance"
+  ]
+}

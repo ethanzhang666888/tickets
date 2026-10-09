@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 tools/android/__pycache__/
+tools/android/usb-executor/*.apk
+tools/android/usb-executor/manifest.json
+tools/android/usb-executor/*.pending

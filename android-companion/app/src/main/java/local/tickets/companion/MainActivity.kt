@@ -27,7 +27,7 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply { addView(layout) }
         setContentView(scroll)
         layout.addView(TextView(this).apply {
-            text = "手机验证与本地执行预览\n配对接口仅用于读取、状态和停止。手机本地任务须在本机明确确认，只操作已适配的大麦原生控件，到确认页立即停止，不提交、不支付。截图和页面文字仅在内存中处理。"
+            text = "手机验证与本地执行预览\n配对接口仅用于读取、状态和停止。手机本地任务须在本机明确确认，适配已知原生布局，并使用用户手动授权的本地文字识别（OCR）核对自绘选票证据；未知或证据不足即停止。选票、数量及观演人核对后停在确认页，不提交、不付款。缺货等待仅被动观察，不主动刷新，无自动提交。截图和名单仅在内存中处理，不保存、不外传。真实业务流程及长时间运行仍待真机验收。"
             textSize = 18f
         })
         fun button(label: String, action: () -> Unit) {
@@ -45,7 +45,7 @@ class MainActivity : Activity() {
         }
         button("3. 打开大麦并仅检查当前页") {
             if (Session.accessibility == null) { toast("请先开启无障碍服务"); return@button }
-            val launch = packageManager.getLaunchIntentForPackage(Safety.DAMAI)
+            val launch = damaiLaunchIntent()
             if (launch == null) { toast("未检测到大麦"); return@button }
             try {
                 startActivity(launch)
@@ -56,7 +56,7 @@ class MainActivity : Activity() {
         button("4. 打开合成测试页（无订单）") { startActivity(Intent(this, SyntheticActivity::class.java)) }
         button(getString(R.string.native_audit_open)) {
             if (Session.accessibility == null) { toast("请先手动开启本应用的无障碍服务"); return@button }
-            val launch = packageManager.getLaunchIntentForPackage(Safety.DAMAI)
+            val launch = damaiLaunchIntent()
             if (launch == null) { toast("未检测到大麦"); return@button }
             Session.armNativeAudit()
             try { startActivity(launch); toast(getString(R.string.native_audit_armed)) }

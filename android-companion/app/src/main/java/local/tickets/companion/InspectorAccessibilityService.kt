@@ -11,7 +11,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.ArrayDeque
 
-/** No gestures/global actions. Local tasks use separately validated, native-only clicks and stop at confirmation. */
+/** No global actions. Local tasks use validated native clicks or scoped public-control touches and stop before submission. */
 class InspectorAccessibilityService : AccessibilityService() {
     private var bridge: LocalBridge? = null
     private var screenReceiverRegistered = false
@@ -35,10 +35,22 @@ class InspectorAccessibilityService : AccessibilityService() {
         bridge = LocalBridge().also { it.start() }
     }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Never stringify or log accessibility events; they can contain private user text.
+        // All-package window transitions are needed to revoke a task during a long stock wait.
+        // Read package/type metadata only: never source, text, description, or event.toString().
+        val type = event?.eventType ?: return
+        val pkg = event.packageName?.toString()
+        val windowState = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        val windowTransition = windowState || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        val allowedPackage = pkg == Safety.DAMAI || pkg == Safety.OWN
+        if (!windowTransition && !allowedPackage) return // Drop external content events without any traversal.
         if (Session.locked(this)) Session.revokeNativeAudit()
+        if (windowState && pkg != null && !allowedPackage) {
+            Session.revokeNativeAudit()
+            Session.capture?.stopSafely("foreground_not_allowed")
+        }
+        local.tickets.companion.execution.LocalExecutionRuntime.foregroundChanged(if (windowState) pkg else null)
+        // Existing capture guard still gates every traversal to permitted package roots.
         Session.capture?.checkForeground()
-        local.tickets.companion.execution.LocalExecutionRuntime.foregroundChanged()
     }
     override fun onInterrupt() {
         local.tickets.companion.execution.LocalExecutionRuntime.stop("accessibility_interrupted")

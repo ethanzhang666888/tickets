@@ -17,7 +17,10 @@ internal fun <T> Observed<T>.known(): T? = (this as? Observed.Known)?.value
 
 enum class PageKind { DETAIL, PICKER, RESERVATION, CONFIRMATION, RISK, QUEUE, LOADING, UNKNOWN }
 enum class Availability { AVAILABLE, SOLD_OUT, UPCOMING, UNAVAILABLE, UNKNOWN }
-enum class SelectionEvidence { NATIVE_SELECTED, NATIVE_UNSELECTED, UNKNOWN }
+enum class SelectionEvidence {
+    NATIVE_SELECTED, NATIVE_UNSELECTED, VISUAL_SELECTED, VISUAL_UNSELECTED, UNKNOWN;
+    fun selected() = this == NATIVE_SELECTED || this == VISUAL_SELECTED
+}
 enum class PageBlocker {
     INCOMPLETE_SNAPSHOT, FOREIGN_PACKAGE, UNKNOWN_PAGE, RISK, QUEUE, LOADING, DIALOG, RESERVATION,
     AMBIGUOUS_STRUCTURE, MISSING_IDENTITY, UNSUPPORTED_OPTIONS, POTENTIALLY_HIDDEN_CONTENT,
@@ -40,8 +43,9 @@ class TicketOption internal constructor(
 /**
  * Partial native observations, NOT an OrderObservation and NOT permission to submit.
  * The known desktop structure only exposes a price-labelled tier, not its full identity.
- * No reliable buyer-row or explicit-fee schema is known; those fields stay Unsupported.
- * In particular checkbox counts do not identify people or establish list completeness.
+ * Full tier identity and explicit fees stay Unsupported. Buyer selection is reviewed
+ * separately against complete native rows by the local manual-submit workflow; this
+ * general observation does not establish buyer identity or authorize submission.
  */
 class ConfirmationFields internal constructor(
     val eventTitle: Observed<String>,
@@ -117,16 +121,16 @@ class PageObservation internal constructor(
         }
         val date = DamaiPageParser.sessionKey(target.session) ?: return blocked(PageBlocker.INVALID_TARGET)
         val matchingSessions = sessions.filter { DamaiPageParser.sessionKey(it.label) == date }
-        val matchingTiers = tiers.filter { DamaiPageParser.normalized(it.label) == DamaiPageParser.normalized(target.tier) && it.unitPriceCents == target.unitPriceCents }
+        val matchingTiers = tiers.filter { DamaiPageParser.tierKey(it.label) == DamaiPageParser.tierKey(target.tier) && it.unitPriceCents == target.unitPriceCents }
         if (matchingSessions.size != 1 || matchingTiers.size != 1) return blocked(PageBlocker.TARGET_MISSING_OR_AMBIGUOUS)
         val session = matchingSessions.single()
         val tier = matchingTiers.single()
-        if (sessions.count { it.selection == SelectionEvidence.NATIVE_SELECTED } != 1 ||
-            session.selection != SelectionEvidence.NATIVE_SELECTED || sessions.any { it.selection == SelectionEvidence.UNKNOWN }) {
+        if (sessions.count { it.selection.selected() } != 1 ||
+            !session.selection.selected() || sessions.any { it.selection == SelectionEvidence.UNKNOWN }) {
             return blocked(PageBlocker.SESSION_ASSOCIATION_UNVERIFIED)
         }
         if (tiers.any { it.selection == SelectionEvidence.UNKNOWN } ||
-            tiers.count { it.selection == SelectionEvidence.NATIVE_SELECTED } > 1) {
+            tiers.count { it.selection.selected() } > 1) {
             return blocked(PageBlocker.SESSION_ASSOCIATION_UNVERIFIED)
         }
         if (session.availability != Availability.AVAILABLE || tier.availability != Availability.AVAILABLE) {

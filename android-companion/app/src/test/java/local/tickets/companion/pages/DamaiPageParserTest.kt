@@ -53,6 +53,59 @@ class DamaiPageParserTest {
     }
     private fun blocked(page: PageObservation, blocker: PageBlocker) = assertTrue(page.blockers.toString(), blocker in page.blockers)
 
+    @Test fun emptyFiveNodeClassicsShellIsLoadingButCannotHideContentOrActions() {
+        val full = NodeBounds(0, 0, 1080, 2340)
+        val shell = listOf(NodeSpec(bounds = full), NodeSpec(parentIndex = 0, bounds = full),
+            NodeSpec(parentIndex = 1, resourceId = "android:id/content", bounds = full),
+            NodeSpec(parentIndex = 2, bounds = full),
+            NodeSpec(parentIndex = 3, resourceId = "cn.damai:id/classics_arrow", bounds = full))
+        fun parse(rows: List<NodeSpec> = shell, complete: Boolean = true) = parser.parse(NodeSnapshot.create(7, rows, complete))
+        assertEquals(PageKind.LOADING, parse().kind)
+        assertEquals(setOf(PageBlocker.LOADING), parse().blockers)
+        assertNotEquals(PageKind.LOADING, parse(complete = false).kind)
+        assertNotEquals(PageKind.LOADING, parse(shell + NodeSpec(parentIndex = 2, bounds = full)).kind)
+        for (change in listOf(shell[4].copy(clickable = true), shell[4].copy(scrollable = true), shell[4].copy(checked = true),
+            shell[4].copy(selected = true), shell[4].copy(text = "其他内容"), shell[4].copy(description = "其他内容"),
+            shell[4].copy(resourceId = "cn.damai:id/unknown"), shell[4].copy(packageName = "other"), shell[4].copy(parentIndex = 0))) {
+            assertNotEquals(PageKind.LOADING, parse(shell.toMutableList().apply { this[4] = change }).kind)
+        }
+        assertEquals(PageKind.RISK, parse(shell.toMutableList().apply { this[4] = this[4].copy(text = "请完成安全验证") }).kind)
+        assertEquals(PageKind.UNKNOWN, parse(shell.toMutableList().apply { this[4] = this[4].copy(text = "确认支付") }).kind)
+    }
+
+    @Test fun measuredDetailScrollRegionsKeepVisibleIdentityAndBuyButtonUsable() {
+        val tree = Tree().apply {
+            val root = add()
+            val refresh = add("id_new_project_refresh", parent = root)
+            val content = add("id_new_project_recycler", parent = refresh, scrollable = true)
+            val video = add("videoContentContainer", parent = content)
+            val pager = add("viewpager", parent = video, scrollable = true)
+            add(parent = pager, scrollable = true)
+            add(DamaiPageParser.DETAIL_TITLE, "测试演出", parent = content)
+            val faq = add("faqs_container", parent = content)
+            add("id_bricks_tour_container", parent = faq, scrollable = true)
+            add(DamaiPageParser.DETAIL_BUTTON, "立即预订", parent = root)
+            nodes[0] = nodes[0].copy(bounds = NodeBounds(0, 0, 600, 1000))
+            nodes[6] = nodes[6].copy(bounds = NodeBounds(10, 450, 590, 550))
+            for (i in 3..5) nodes[i] = nodes[i].copy(bounds = NodeBounds(0, 0, 600, 480))
+            for (i in 7..8) nodes[i] = nodes[i].copy(bounds = NodeBounds(10, 600, 590, 700))
+            nodes[9] = nodes[9].copy(bounds = NodeBounds(0, 900, 600, 1000))
+        }
+        val page = parser.parse(tree.snapshot())
+        assertEquals(PageKind.DETAIL, page.kind)
+        assertTrue(page.blockers.toString(), page.blockers.isEmpty())
+        for ((index, bad) in listOf(
+            8 to tree.nodes[8].copy(resourceId = "unknown"),
+            4 to tree.nodes[4].copy(bounds = NodeBounds(0, 0, 600, 500)),
+            9 to tree.nodes[9].copy(parentIndex = 2),
+            6 to tree.nodes[6].copy(bounds = NodeBounds(10, 850, 590, 950)),
+            5 to tree.nodes[5].copy(parentIndex = 0)
+        )) {
+            val rows = tree.nodes.toMutableList().apply { this[index] = bad }
+            blocked(parser.parse(NodeSnapshot.create(7, rows, true)), PageBlocker.POTENTIALLY_HIDDEN_CONTENT)
+        }
+    }
+
     @Test fun uniqueNativePairMatchesOnlySelectedSessionAndExactTierAndCents() {
         val page = parser.parse(picker().snapshot())
         assertEquals(PageKind.PICKER, page.kind)

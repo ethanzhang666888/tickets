@@ -17,6 +17,13 @@ import android.view.WindowManager
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import local.tickets.companion.execution.ExecutionCapturePolicy
+import local.tickets.companion.execution.ExecutionVisualSelection
+import local.tickets.companion.execution.NativePageAccess
+import local.tickets.companion.pages.NodeBounds
+import local.tickets.companion.pages.NodeSnapshot
+import local.tickets.companion.pages.VisualEvidence
+import local.tickets.companion.pages.VisualWord
 
 /** Frames are transient memory only. No files, bitmap export, raw OCR export, or telemetry. */
 class CaptureService : Service() {
@@ -29,6 +36,11 @@ class CaptureService : Service() {
     private val recognizer by lazy { TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()) }
     private var recognizerUsed = false
     private var pending: SafeSummary? = null
+    private class ExecutionRequest(val snapshot: NodeSnapshot, val windowId: Int,
+        val generation: Long, val callback: (VisualEvidence?, String?) -> Unit)
+    private var execution: ExecutionRequest? = null
+    private var executionGeneration = 0L
+    private val executionTimeout = Runnable { if (execution != null) stopSafely("capture_or_ocr_timeout") }
     private var requestedAt = 0L
     private var expectedPageIsSynthetic = false
     private var processing = false
@@ -51,7 +63,7 @@ class CaptureService : Service() {
             }
             val metrics = screenMetrics()
             if (metrics.widthPixels != width || metrics.heightPixels != height) { stopSafely("display_changed_regrant_required"); return }
-            if ((pending != null || processing) && SystemClock.elapsedRealtime() - requestedAt > 12_000) {
+            if ((pending != null || execution != null || processing) && SystemClock.elapsedRealtime() - requestedAt > 12_000) {
                 stopSafely("capture_or_ocr_timeout"); return
             }
             Session.main.postDelayed(this, 400)
@@ -62,7 +74,7 @@ class CaptureService : Service() {
     fun checkForeground(): Boolean {
         if (stopped) return false
         val error = Session.accessibility?.guardError() ?: if (Session.accessibility == null) "accessibility_lost" else null
-        return when (foregroundGuard.evaluate(error, pending == null && !processing, SystemClock.elapsedRealtime())) {
+        return when (foregroundGuard.evaluate(error, pending == null && execution == null && !processing, SystemClock.elapsedRealtime())) {
             ForegroundGuard.Decision.ALLOW -> {
                 if (Session.captureState == "waiting_foreground") Session.captureState = "ready"
                 true
@@ -86,7 +98,7 @@ class CaptureService : Service() {
         val stop = PendingIntent.getService(this, 0, Intent(this, CaptureService::class.java).setAction("stop"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val open = PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = Notification.Builder(this, "capture")
-            .setContentTitle("仅可行性验证 · 屏幕读取已授权")
+            .setContentTitle("屏幕读取已授权 · 仅手机本地处理")
             .setContentText("不下单不支付。锁屏、离开允许页面或权限失效即停止。")
             .setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).setContentIntent(open)
             .addAction(Notification.Action.Builder(null, "停止读取", stop).build()).build()
@@ -138,9 +150,57 @@ class CaptureService : Service() {
         }
     }
 
+    /** Main-thread only. Results remain phone-local; feasibility/status APIs never receive them. */
+    fun requestExecutionCapture(snapshot: NodeSnapshot, callback: (VisualEvidence?, String?) -> Unit) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (stopped || projection == null || Session.capture !== this) { callback(null, "capture_not_authorized"); return }
+        if (pending != null || execution != null || processing) { callback(null, "capture_busy"); return }
+        if (!ExecutionCapturePolicy.allowed(snapshot)) { callback(null, "capture_page_not_allowed"); return }
+        val service = Session.accessibility
+        if (service == null || !checkForeground()) { callback(null, "foreground_unavailable"); return }
+        val baseline = NativePageAccess.read(service, snapshot.captureId) { !stopped && Session.capture === this }
+        val windowId = baseline?.use {
+            if (ExecutionCapturePolicy.sameSnapshot(snapshot, it.snapshot)) it.windowId else null
+        }
+        if (windowId == null) { callback(null, "native_page_changed"); return }
+        requestedAt = SystemClock.elapsedRealtime()
+        execution = ExecutionRequest(snapshot, windowId, ++executionGeneration, callback)
+        diagnostics.reset()
+        Session.captureDiagnostics = diagnostics
+        expectedPageIsSynthetic = false
+        Session.captureState = "awaiting_frame"
+        Session.main.postDelayed(executionTimeout, 8_000)
+        try { freshSurface() } catch (_: Exception) { diagnostics.captureFailed(); stopSafely("capture_failed_or_secure") }
+    }
+
+    /** Cancellation never recycles an ML Kit input until its task completes. */
+    internal fun cancelExecutionCapture(callback: (VisualEvidence?, String?) -> Unit) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val request = execution ?: return
+        if (request.callback !== callback) return
+        execution = null
+        executionGeneration++
+        frameEpoch.invalidate()
+        Session.main.removeCallbacks(executionTimeout)
+        try { display?.surface = null } catch (_: Exception) { stopSafely("capture_failed_or_secure") }
+        if (!stopped) Session.captureState = if (processing) "ocr_running" else "ready"
+    }
+
+    private fun freshSurface() {
+        // A fresh reader/surface, not timestamp comparisons across incompatible Android clocks.
+        display?.surface = null
+        frameEpoch.invalidate()
+        val previous = reader
+        reader = null
+        previous?.setOnImageAvailableListener(null, null)
+        previous?.close()
+        reader = createReader(frameEpoch.begin())
+        display?.surface = reader?.surface
+    }
+
     fun requestCapture(summary: SafeSummary) {
         if (stopped || projection == null) return
-        if (pending != null || processing) { Session.lastError = "capture_busy"; return }
+        if (pending != null || execution != null || processing) { Session.lastError = "capture_busy"; return }
         val error = Session.accessibility?.guardError() ?: if (Session.accessibility == null) "accessibility_lost" else null
         if (error != null || (summary.pageKind != "synthetic" && !isDamaiForeground())) { stopSafely(error ?: "foreground_not_allowed"); return }
         requestedAt = SystemClock.elapsedRealtime()
@@ -151,16 +211,7 @@ class CaptureService : Service() {
         Session.captureState = "awaiting_frame"
         Session.summary = summary.copy(captureState = "awaiting_frame")
         try {
-            // This surface and its buffers did not exist before this request. Old
-            // reader callbacks are excluded by both object identity and generation.
-            display?.surface = null
-            frameEpoch.invalidate()
-            val previous = reader
-            reader = null
-            previous?.setOnImageAvailableListener(null, null)
-            previous?.close()
-            reader = createReader(frameEpoch.begin())
-            display?.surface = reader?.surface
+            freshSurface()
         } catch (_: Exception) { diagnostics.captureFailed(); stopSafely("capture_failed_or_secure") }
     }
 
@@ -179,6 +230,7 @@ class CaptureService : Service() {
 
     private fun consume(image: Image, epoch: Long) {
         if (!frameEpoch.accepts(epoch)) return
+        execution?.let { consumeExecution(image, it); return }
         val native = pending ?: return
         if (stopped || processing) return
         diagnostics.frameReceived()
@@ -195,16 +247,11 @@ class CaptureService : Service() {
         var ocrInvoked = false
         try {
             display?.surface = null // Do not continuously produce frames during OCR/idle.
-            val plane = image.planes[0]
-            check(plane.pixelStride == 4)
-            val paddedWidth = plane.rowStride / plane.pixelStride
-            val padded = Bitmap.createBitmap(paddedWidth, image.height, Bitmap.Config.ARGB_8888)
-            padded.copyPixelsFromBuffer(plane.buffer)
-            bitmap = Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
-            if (bitmap !== padded) padded.recycle()
+            bitmap = imageBitmap(image)
             // Protected windows commonly return a black frame. Do not claim this proves FLAG_SECURE.
             if (likelyBlank(bitmap)) {
                 bitmap.recycle()
+                processing = false
                 diagnostics.captureFailed()
                 stopSafely("secure_or_blank_frame")
                 return
@@ -252,6 +299,110 @@ class CaptureService : Service() {
         }
     }
 
+    private fun executionCurrent(request: ExecutionRequest): Boolean = !stopped && execution === request &&
+        executionGeneration == request.generation && SystemClock.elapsedRealtime() - requestedAt < 8_000 && Session.capture === this
+
+    private fun executionPageMatches(request: ExecutionRequest): Boolean {
+        if (!executionCurrent(request)) return false
+        val service = Session.accessibility ?: return false
+        if (service.guardError() != null || !NativePageAccess.foregroundMatches(service, request.windowId)) return false
+        return NativePageAccess.read(service, request.snapshot.captureId) { executionCurrent(request) }?.use {
+            it.windowId == request.windowId && ExecutionCapturePolicy.sameSnapshot(request.snapshot, it.snapshot)
+        } == true
+    }
+
+    private fun finishExecution(request: ExecutionRequest, evidence: VisualEvidence) {
+        if (!executionCurrent(request)) return
+        execution = null
+        executionGeneration++
+        Session.main.removeCallbacks(executionTimeout)
+        Session.captureState = "ready"
+        Session.lastError = "none"
+        // A consumer failure must not escape into a framework callback or skip bitmap cleanup.
+        runCatching { request.callback(evidence, null) }
+    }
+
+    private fun imageBitmap(image: Image): Bitmap {
+        check(image.width == width && image.height == height)
+        val plane = image.planes[0]
+        check(plane.pixelStride == 4 && plane.rowStride % plane.pixelStride == 0)
+        val padded = Bitmap.createBitmap(plane.rowStride / plane.pixelStride, image.height, Bitmap.Config.ARGB_8888)
+        var result: Bitmap? = null
+        try {
+            padded.copyPixelsFromBuffer(plane.buffer)
+            result = Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
+            return result
+        } finally { if (result !== padded) padded.recycle() }
+    }
+
+    private fun consumeExecution(image: Image, request: ExecutionRequest) {
+        // Include all following native validation and OCR time in the visual freshness budget.
+        val capturedAt = SystemClock.elapsedRealtime()
+        if (!executionCurrent(request) || processing) return
+        diagnostics.frameReceived()
+        if (!executionPageMatches(request)) { stopSafely("native_page_changed"); return }
+        diagnostics.compareFrameClock(image.timestamp / 1_000_000, requestedAt)
+        diagnostics.frameAccepted()
+        frameEpoch.invalidate()
+        processing = true
+        var bitmap: Bitmap? = null
+        var taskOwnsBitmap = false
+        try {
+            display?.surface = null
+            bitmap = imageBitmap(image)
+            if (likelyBlank(bitmap)) { diagnostics.captureFailed(); stopSafely("secure_or_blank_frame"); return }
+            val screen = NodeBounds(0, 0, width, height)
+            val cards = if (ExecutionCapturePolicy.picker(request.snapshot)) ExecutionCapturePolicy.cards(request.snapshot)
+                ?: throw IllegalStateException("Invalid native card layout") else emptyList()
+            check(cards.all { screen.contains(it.bounds) })
+            val selected = cards.associate { card ->
+                card.index to ExecutionVisualSelection.selected(width, height, card.bounds, bitmap::getPixel)
+            }
+            val ownedBitmap = bitmap
+            recognizerUsed = true
+            diagnostics.ocrStarted()
+            Session.captureState = "ocr_running"
+            val task = recognizer.process(InputImage.fromBitmap(ownedBitmap, 0))
+            taskOwnsBitmap = true
+            task.addOnSuccessListener { text ->
+                if (!executionCurrent(request)) return@addOnSuccessListener
+                try {
+                    diagnostics.ocrCompleted()
+                    if (!executionPageMatches(request)) { stopSafely("native_page_changed"); return@addOnSuccessListener }
+                    val picker = ExecutionCapturePolicy.picker(request.snapshot)
+                    if (ExecutionCapturePolicy.unsafeWords(text.textBlocks.map { it.text } + text.text, picker)) {
+                        stopSafely("capture_page_not_allowed"); return@addOnSuccessListener
+                    }
+                    // ML Kit Chinese exposes no calibrated confidence: never synthesize a probability.
+                    val words = text.textBlocks.flatMap { it.lines }.mapNotNull { line ->
+                        val rect = line.boundingBox ?: return@mapNotNull null
+                        val bounds = NodeBounds(rect.left, rect.top, rect.right, rect.bottom)
+                        if (line.text.isBlank() || !screen.contains(bounds) ||
+                            !request.snapshot.nodes.first().bounds.contains(bounds)) null else VisualWord(line.text, bounds)
+                    }
+                    // Constructor enforces count/text budgets; overflow rejects the entire result.
+                    finishExecution(request, VisualEvidence(request.snapshot.captureId, width, height, words, selected, capturedAt))
+                } catch (_: Exception) { stopSafely("capture_evidence_invalid") }
+            }.addOnFailureListener {
+                if (executionCurrent(request)) { diagnostics.ocrFailed(); stopSafely("ocr_unavailable") }
+            }.addOnCompleteListener {
+                ownedBitmap.recycle()
+                processing = false
+                if (stopped && recognizerUsed) recognizer.close()
+                else if (execution == null && pending == null) Session.captureState = "ready"
+            }
+        } catch (_: Exception) {
+            diagnostics.captureFailed()
+            stopSafely("capture_failed_or_secure")
+        } finally {
+            if (!taskOwnsBitmap) {
+                bitmap?.recycle()
+                processing = false
+                if (stopped && recognizerUsed) recognizer.close()
+            }
+        }
+    }
+
     private fun likelyBlank(bitmap: Bitmap): Boolean {
         var bright = 0
         var total = 0
@@ -269,10 +420,15 @@ class CaptureService : Service() {
     fun stopSafely(reason: String) {
         if (stopped) return
         stopped = true
+        local.tickets.companion.execution.LocalExecutionRuntime.captureStopped(reason)
         frameEpoch.invalidate()
         // Preserve the last phase/counters after summary reset, including timeout evidence.
         diagnostics.freeze()
         pending = null
+        val abandoned = execution
+        execution = null
+        executionGeneration++
+        Session.main.removeCallbacks(executionTimeout)
         Session.main.removeCallbacks(guard)
         Session.capture = null
         Session.captureState = reason
@@ -284,6 +440,7 @@ class CaptureService : Service() {
         if (recognizerUsed && !processing) recognizer.close()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        abandoned?.let { runCatching { it.callback(null, reason) } }
     }
     override fun onDestroy() {
         stopSafely("capture_service_stopped")

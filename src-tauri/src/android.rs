@@ -6,9 +6,9 @@ use std::{
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex as StdMutex,
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -26,6 +26,23 @@ pub struct AndroidDevice {
     serial: String,
     state: String,
     model: String,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AndroidBackend {
+    #[default]
+    Usb,
+    Legacy,
+}
+
+impl AndroidBackend {
+    fn script_name(self) -> &'static str {
+        match self {
+            Self::Usb => "usb_driver.py",
+            Self::Legacy => "driver.py",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -58,6 +75,8 @@ pub struct AndroidConfig {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AndroidRequest {
+    #[serde(default)]
+    backend: AndroidBackend,
     action: AndroidAction,
     device_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,12 +102,90 @@ struct DriverReply {
     error: Option<String>,
 }
 
+#[derive(Default)]
+struct DeviceActivity {
+    version: u64,
+    may_be_active: bool,
+    updated_at: f64,
+}
+
+#[derive(Default)]
+struct ChannelState {
+    in_flight: usize,
+    devices: HashMap<String, DeviceActivity>,
+    inspected_devices: HashSet<String>,
+}
+
+impl ChannelState {
+    fn can_switch(&self, has_pending_replies: bool) -> Result<(), String> {
+        if self.in_flight > 0 || has_pending_replies {
+            return Err("旧模式仍有操作或状态请求在途，请等待结束后切换。".into());
+        }
+        if self.devices.values().any(|device| device.may_be_active) {
+            return Err("旧模式仍有活动任务，请返回旧模式读取状态并停止，再切换模式。".into());
+        }
+        Ok(())
+    }
+
+    fn begin(&mut self, request: &AndroidRequest) -> u64 {
+        self.in_flight += 1;
+        let device = self.devices.entry(request.device_id.clone()).or_default();
+        if request.action != AndroidAction::Status {
+            device.version += 1;
+        }
+        // A failed/cancelled start may already have reached the phone. Only a
+        // subsequent trustworthy status or stop may establish that it is idle.
+        if matches!(request.action, AndroidAction::Prepare | AndroidAction::Start) {
+            device.may_be_active = true;
+        }
+        device.version
+    }
+
+    fn observe(&mut self, request: &AndroidRequest, version: u64, state: &Value, has_pending_replies: bool) {
+        let device = self.devices.entry(request.device_id.clone()).or_default();
+        if device.version != version {
+            return;
+        }
+        let status = state["status"].as_str().unwrap_or("");
+        let valid = state["deviceId"].as_str() == Some(request.device_id.as_str())
+            && matches!(status, "idle" | "ready" | "needs_action" | "cancelled" | "interrupted" | "failed" | "preparing" | "waiting" | "running");
+        let updated_at = state["updatedAt"].as_f64().unwrap_or(0.0);
+        if valid && updated_at < device.updated_at {
+            return;
+        }
+        let active = !valid || matches!(status, "preparing" | "waiting" | "running");
+        // Status can race a queued start/stop. Never use that snapshot to clear
+        // the activity fence while another request (even a cancelled one) runs.
+        if active || request.action != AndroidAction::Status || (self.in_flight == 1 && !has_pending_replies) {
+            device.may_be_active = active;
+            device.updated_at = updated_at;
+        }
+        if valid && request.action == AndroidAction::Inspect {
+            self.inspected_devices.insert(request.device_id.clone());
+        }
+    }
+}
+
 struct Driver {
+    backend: AndroidBackend,
+    channel: StdMutex<ChannelState>,
     stdin: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
     pending: PendingReplies,
     alive: Arc<AtomicBool>,
-    inspected_devices: Mutex<HashSet<String>>,
+}
+
+// Reserved while the manager's driver slot is locked, so channel switching
+// cannot pass its idle check between selection of a driver and sending a request.
+struct DriverRequest {
+    driver: Arc<Driver>,
+    version: u64,
+}
+
+impl Drop for DriverRequest {
+    fn drop(&mut self) {
+        self.driver.channel.lock().unwrap().in_flight -= 1;
+    }
 }
 
 #[derive(Default)]
@@ -183,23 +280,47 @@ fn driver_candidates(
     candidates
 }
 
-fn driver_script(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn android_resource_candidates(app: &tauri::AppHandle, relative: &str) -> Result<Vec<PathBuf>, String> {
     let executable = std::env::current_exe().map_err(|_| "无法确定应用运行位置。")?;
-    let mut resources = Vec::new();
-    for resource in ["_up_/tools/android/driver.py", "tools/android/driver.py"] {
-        if let Some(path) = app.path_resolver().resolve_resource(resource) {
-            resources.push(path);
-        }
-    }
+    let resources = [format!("_up_/tools/android/{relative}"), format!("tools/android/{relative}")]
+        .iter()
+        .filter_map(|resource| app.path_resolver().resolve_resource(resource))
+        .collect();
     let development = cfg!(debug_assertions)
-        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/android/driver.py"));
-    driver_candidates(is_macos_app_bundle(&executable), resources, development)
+        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/android").join(relative));
+    Ok(driver_candidates(is_macos_app_bundle(&executable), resources, development))
+}
+
+fn driver_script(app: &tauri::AppHandle, backend: AndroidBackend) -> Result<PathBuf, String> {
+    android_resource_candidates(app, backend.script_name())?
         .into_iter()
         .find(|path| path.is_file())
-        .ok_or_else(|| "缺少安卓驱动文件，请重新构建 Tickets。".into())
+        .ok_or_else(|| format!("缺少安卓驱动文件 {}，请重新构建 Tickets。", backend.script_name()))
+}
+
+fn optional_resource_path(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    // Missing APKs must not hide submission records or disable status/stop.
+    // The USB driver reports the missing file only when installation is needed.
+    candidates.iter().find(|path| path.is_file()).cloned().or_else(|| candidates.into_iter().next())
+}
+
+fn validate_usb_schedule(request: &AndroidRequest, now_ms: u64) -> Result<(), String> {
+    if request.backend == AndroidBackend::Usb && request.action == AndroidAction::Start {
+        if let Some(start_at) = request.config.as_ref().and_then(|config| config.start_at) {
+            if start_at <= now_ms || start_at > now_ms.saturating_add(86_400_000) {
+                return Err("USB 模式开始时间须在未来 24 小时内。".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_request(request: &AndroidRequest) -> Result<(), String> {
+    if request.backend == AndroidBackend::Usb && request.config.as_ref().map(|config| config.auto_submit).unwrap_or(false) {
+        return Err("USB 模式仅核验订单，不允许自动提交或付款。".into());
+    }
+    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| "系统时间无效。")?.as_millis() as u64;
+    validate_usb_schedule(request, now_ms)?;
     let serial = &request.device_id;
     if serial.is_empty()
         || serial.len() > 128
@@ -336,10 +457,10 @@ async fn route_reply(line: &str, pending: &PendingReplies) -> Result<bool, Strin
 }
 
 impl Driver {
-    async fn spawn(app: &tauri::AppHandle) -> Result<Arc<Self>, String> {
+    async fn spawn(app: &tauri::AppHandle, backend: AndroidBackend) -> Result<Arc<Self>, String> {
         let uv = executable("uv").ok_or("未找到 uv，请先安装 Python 运行工具 uv。")?;
         let adb = executable("adb").ok_or("未找到 ADB，请先安装 Android platform-tools。")?;
-        let script = driver_script(app)?;
+        let script = driver_script(app, backend)?;
         let working_directory = app
             .path_resolver()
             .app_cache_dir()
@@ -357,6 +478,11 @@ impl Driver {
             path.insert(0, directory.into());
         }
         let mut command = Command::new(uv);
+        if backend == AndroidBackend::Usb {
+            let apk = optional_resource_path(android_resource_candidates(app, "usb-executor/app-usb-executor.apk")?)
+                .ok_or("无法定位 USB 执行器资源目录。")?;
+            command.env("TICKETS_USB_EXECUTOR_APK", apk);
+        }
         command
             .args(["run", "--offline", "--no-project", "--quiet"])
             .arg(&script)
@@ -385,11 +511,12 @@ impl Driver {
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let driver = Arc::new(Self {
+            backend,
+            channel: StdMutex::new(ChannelState::default()),
             stdin: Mutex::new(Some(stdin)),
             child: Mutex::new(child),
             pending: pending.clone(),
             alive: alive.clone(),
-            inspected_devices: Mutex::new(HashSet::new()),
         });
         let weak_driver = Arc::downgrade(&driver);
         tauri::async_runtime::spawn(async move {
@@ -458,6 +585,7 @@ impl Driver {
 
     async fn shutdown_with_grace(&self, grace: Duration) {
         self.alive.store(false, Ordering::Release);
+        self.channel.lock().unwrap().inspected_devices.clear();
         self.stdin.lock().await.take();
         fail_pending(&self.pending, "安卓驱动已停止。").await;
         let mut child = self.child.lock().await;
@@ -495,40 +623,57 @@ impl AndroidManager {
         if self.closing.load(Ordering::Acquire) {
             return Err("Tickets 正在退出。".into());
         }
-        let driver = {
+        let lease = {
             let mut slot = self.driver.lock().await;
             if self.closing.load(Ordering::Acquire) {
                 return Err("Tickets 正在退出。".into());
             }
-            if slot
-                .as_ref()
-                .map(|driver| !driver.alive.load(Ordering::Acquire))
-                .unwrap_or(false)
-            {
-                if let Some(previous) = slot.take() {
+            let replacing = slot.as_ref().map(|driver| {
+                driver.backend != request.backend || !driver.alive.load(Ordering::Acquire)
+            }).unwrap_or(false);
+            if replacing || slot.is_none() {
+                // Switching or restarting never restores an inspection credential.
+                if !matches!(request.action, AndroidAction::Inspect | AndroidAction::Status | AndroidAction::Stop | AndroidAction::AcknowledgeSubmission) {
+                    return Err("请先读取手机页面。切换模式或驱动重启后不会自动恢复演练。".into());
+                }
+                if let Some(previous) = slot.as_ref() {
+                    let has_pending = !previous.pending.lock().await.is_empty();
+                    let channel = previous.channel.lock().unwrap();
+                    if previous.backend != request.backend {
+                        channel.can_switch(has_pending)?;
+                    } else if channel.in_flight > 0 || has_pending {
+                        return Err("旧驱动仍有在途请求，请等待结束后重新读取或停止。".into());
+                    }
+                }
+                if let Some(previous) = slot.as_ref().cloned() {
+                    // Retain the slot across await, even if this caller is cancelled.
+                    // A successor must finish shutdown before it can spawn anything.
                     previous.shutdown().await;
+                    slot.take();
                 }
-            }
-            if slot.is_none() {
-                match request.action {
-                    // Reading status must surface durable submission fences after restart.
-                    // Spawning the driver alone does not connect to or operate the phone.
-                    AndroidAction::Inspect | AndroidAction::Status | AndroidAction::Stop
-                        | AndroidAction::AcknowledgeSubmission => *slot = Some(Driver::spawn(app).await?),
-                    _ => return Err("请先读取手机页面。驱动重启后不会自动恢复演练。".into()),
+                if self.closing.load(Ordering::Acquire) {
+                    return Err("Tickets 正在退出。".into());
                 }
+                // Reading status must surface the same durable submission ledger.
+                *slot = Some(Driver::spawn(app, request.backend).await?);
             }
-            slot.as_ref().unwrap().clone()
+            let driver = slot.as_ref().unwrap().clone();
+            let version = {
+                let mut channel = driver.channel.lock().unwrap();
+                validate_inspected_device(&request, &channel.inspected_devices)?;
+                channel.begin(&request)
+            };
+            DriverRequest { driver, version }
         };
-        validate_inspected_device(&request, &*driver.inspected_devices.lock().await)?;
-        let result = driver.request(&request).await?;
-        if request.action == AndroidAction::Inspect {
-            driver
-                .inspected_devices
-                .lock()
-                .await
-                .insert(request.device_id);
+        let result = lease.driver.request(&request).await?;
+        let pending = lease.driver.pending.lock().await;
+        let mut channel = lease.driver.channel.lock().unwrap();
+        channel.observe(&request, lease.version, &result, !pending.is_empty());
+        if !lease.driver.alive.load(Ordering::Acquire) {
+            channel.inspected_devices.clear();
         }
+        drop(channel);
+        drop(pending);
         Ok(result)
     }
 }
@@ -570,6 +715,108 @@ mod tests {
     }
 
     #[test]
+    fn backend_defaults_to_usb_and_preserves_explicit_legacy_serialization() {
+        let request = request_from(json!({"action":"status", "deviceId":"device-1"}));
+        assert_eq!(request.backend, AndroidBackend::Usb);
+        assert_eq!(serde_json::to_value(request).unwrap()["backend"], "usb");
+        for backend in ["usb", "legacy"] {
+            let payload = json!({"backend":backend, "action":"status", "deviceId":"device-1"});
+            assert_eq!(serde_json::to_value(request_from(payload.clone())).unwrap(), payload);
+        }
+        assert!(serde_json::from_value::<AndroidRequest>(json!({"backend":"other", "action":"status", "deviceId":"device-1"})).is_err());
+        assert_eq!(AndroidBackend::Usb.script_name(), "usb_driver.py");
+        assert_eq!(AndroidBackend::Legacy.script_name(), "driver.py");
+    }
+
+    #[test]
+    fn usb_rejects_automatic_submission_for_every_action_but_legacy_retains_it() {
+        for action in ["inspect", "open_picker", "select_session", "prepare", "start", "stop", "status", "acknowledge_submission"] {
+            let mut payload = json!({"action":action, "deviceId":"device-1", "config":valid_config()});
+            payload["config"]["autoSubmit"] = json!(true);
+            assert!(validate_request(&request_from(payload)).unwrap_err().contains("USB"));
+        }
+        let mut legacy = request_from(json!({"backend":"legacy", "action":"prepare", "deviceId":"device-1", "config":valid_config()}));
+        legacy.config.as_mut().unwrap().auto_submit = true;
+        assert!(validate_request(&legacy).is_ok());
+    }
+
+    #[test]
+    fn usb_schedule_is_bounded_to_twenty_four_hours_without_changing_legacy() {
+        let now = 1_800_000_000_000;
+        let mut request = request_from(json!({"action":"start", "deviceId":"device-1", "config":valid_config()}));
+        for offset in [1, 86_400_000] {
+            request.config.as_mut().unwrap().start_at = Some(now + offset);
+            assert!(validate_usb_schedule(&request, now).is_ok());
+        }
+        for at in [now - 1, now, now + 86_400_001] {
+            request.config.as_mut().unwrap().start_at = Some(at);
+            assert!(validate_usb_schedule(&request, now).is_err());
+        }
+        request.backend = AndroidBackend::Legacy;
+        request.config.as_mut().unwrap().start_at = Some(now + 7 * 86_400_000);
+        assert!(validate_usb_schedule(&request, now).is_ok());
+    }
+
+    #[test]
+    fn switching_requires_idle_channel_without_any_in_flight_or_cancelled_request() {
+        let mut channel = ChannelState::default();
+        assert!(channel.can_switch(false).is_ok());
+        assert!(channel.can_switch(true).is_err());
+        for status in ["preparing", "waiting", "running", "ready", "needs_action", "cancelled", "interrupted", "failed", "idle"] {
+            let request = request_from(json!({"action":"status", "deviceId":"device-1"}));
+            let version = channel.begin(&request);
+            assert!(channel.can_switch(false).is_err());
+            channel.observe(&request, version, &json!({"deviceId":"device-1", "status":status}), false);
+            channel.in_flight -= 1;
+            assert_eq!(channel.can_switch(false).is_err(), matches!(status, "preparing" | "waiting" | "running"));
+        }
+    }
+
+    #[test]
+    fn stale_replies_and_status_during_start_cannot_clear_the_activity_fence() {
+        let mut channel = ChannelState::default();
+        let status = request_from(json!({"action":"status", "deviceId":"device-1"}));
+        let prepare = request_from(json!({"action":"prepare", "deviceId":"device-1", "config":valid_config()}));
+        let idle = json!({"deviceId":"device-1", "status":"idle", "updatedAt":1});
+        let before_start = channel.begin(&status);
+        let preparation_version = channel.begin(&prepare);
+        channel.observe(&status, before_start, &idle, false);
+        channel.in_flight -= 1;
+        assert!(channel.devices["device-1"].may_be_active);
+        let during_start = channel.begin(&status);
+        channel.observe(&status, during_start, &idle, false);
+        channel.in_flight -= 1;
+        assert!(channel.devices["device-1"].may_be_active);
+        // A cancelled caller does not establish that preparation failed.
+        channel.in_flight -= 1;
+        assert!(channel.can_switch(false).is_err());
+        let after_cancel = channel.begin(&status);
+        channel.observe(&status, after_cancel, &idle, true);
+        assert!(channel.devices["device-1"].may_be_active);
+        channel.observe(&status, after_cancel, &idle, false);
+        channel.in_flight -= 1;
+        assert!(channel.can_switch(false).is_ok());
+        let stop = request_from(json!({"action":"stop", "deviceId":"device-1"}));
+        let stop_version = channel.begin(&stop);
+        channel.observe(&stop, stop_version, &json!({"deviceId":"device-1", "status":"cancelled", "updatedAt":3}), false);
+        channel.observe(&prepare, preparation_version, &json!({"deviceId":"device-1", "status":"running", "updatedAt":2}), false);
+        channel.in_flight -= 1;
+        assert!(channel.can_switch(false).is_ok());
+    }
+
+    #[test]
+    fn inspection_credentials_are_channel_local_and_missing_apk_keeps_a_candidate() {
+        let mut channel = ChannelState::default();
+        let inspect = request_from(json!({"action":"inspect", "deviceId":"device-1"}));
+        let version = channel.begin(&inspect);
+        channel.observe(&inspect, version, &json!({"deviceId":"device-1", "status":"idle"}), false);
+        assert!(channel.inspected_devices.contains("device-1"));
+        assert!(ChannelState::default().inspected_devices.is_empty());
+        let missing = PathBuf::from("/missing-tickets-resource/tools/android/usb-executor/app-usb-executor.apk");
+        assert_eq!(optional_resource_path(vec![missing.clone()]), Some(missing));
+    }
+
+    #[test]
     fn buyer_selection_defaults_or_matches_ticket_count_without_duplicates() {
         let mut payload = json!({"action":"prepare", "deviceId":"device-1", "config":valid_config()});
         assert!(validate_request(&request_from(payload.clone())).is_ok());
@@ -605,7 +852,7 @@ mod tests {
 
     #[test]
     fn submission_acknowledgement_requires_explicit_matching_attempt_fields() {
-        let payload = json!({"action":"acknowledge_submission", "deviceId":"device-1", "attemptId":"a".repeat(32), "acknowledged":true});
+        let payload = json!({"backend":"usb", "action":"acknowledge_submission", "deviceId":"device-1", "attemptId":"a".repeat(32), "acknowledged":true});
         let request: AndroidRequest = serde_json::from_value(payload.clone()).expect("acknowledgement action");
         assert!(validate_request(&request).is_ok());
         assert_eq!(serde_json::to_value(request).unwrap(), payload);
@@ -651,7 +898,7 @@ mod tests {
 
     #[test]
     fn start_requires_bounded_prepared_id_and_preserves_scheduled_configuration() {
-        let mut payload = json!({"action":"start", "deviceId":"device-1", "config":valid_config()});
+        let mut payload = json!({"backend":"legacy", "action":"start", "deviceId":"device-1", "config":valid_config()});
         assert!(validate_request(&request_from(payload.clone())).is_err());
         for id in [
             "".to_string(),
@@ -671,7 +918,7 @@ mod tests {
 
     #[test]
     fn session_selection_requires_event_identity_and_a_bounded_label() {
-        let payload = json!({"action":"select_session", "deviceId":"device-1", "eventTitle":"目标演出", "session":"10月17日 19:30"});
+        let payload = json!({"backend":"usb", "action":"select_session", "deviceId":"device-1", "eventTitle":"目标演出", "session":"10月17日 19:30"});
         let request = request_from(payload.clone());
         assert!(validate_request(&request).is_ok());
         assert_eq!(serde_json::to_value(request).unwrap(), payload);
@@ -839,11 +1086,12 @@ mod tests {
         let (sender, receiver) = oneshot::channel();
         pending.lock().await.insert("pending".into(), sender);
         let driver = Driver {
+            backend: AndroidBackend::Usb,
+            channel: StdMutex::new(ChannelState::default()),
             stdin: Mutex::new(Some(stdin)),
             child: Mutex::new(child),
             pending,
             alive: Arc::new(AtomicBool::new(true)),
-            inspected_devices: Mutex::new(HashSet::new()),
         };
         timeout(
             Duration::from_secs(3),

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import UiIcon from "../components/common/UiIcon.vue";
-import { androidRuntime, androidDesktop, androidActive, androidActiveTasks, androidRequest, listAndroidDevices, androidStatusLabels, androidPageLabels } from "../services/android.js";
+import { androidRuntime, androidDesktop, androidActive, androidActiveTasks, androidRequest, switchAndroidBackend, listAndroidDevices, androidStatusLabels, androidPageLabels } from "../services/android.js";
 import { androidConfig, androidPreparedConfig, androidLowestTier, androidTargetMatchesPrepared, androidIsActive, connectedAndroidDevice, androidLabelKey } from "../services/androidValidation.js";
 import { formatTime } from "../services/platforms.js";
 
@@ -17,6 +17,7 @@ let timer;
 let operationGeneration = 0;
 let restoringTarget = false;
 let targetInitialized = false;
+const usbMode = computed(() => androidRuntime.backend === "usb");
 const state = computed(() => androidRuntime.states[androidRuntime.deviceId]);
 const page = computed(() => state.value?.page);
 const buyerMode = computed({
@@ -27,7 +28,7 @@ const buyerText = computed({
     get: () => form.buyerLabels.join("\n"),
     set: value => { form.buyerLabels = value.split(/\r?\n/); },
 });
-const buyerChoices = computed(() => page.value?.kind === "confirm" ? page.value.buyers || [] : []);
+const buyerChoices = computed(() => !usbMode.value && page.value?.kind === "confirm" ? page.value.buyers || [] : []);
 const buyerChosen = item => form.buyerLabels.some(label => androidLabelKey(label) === androidLabelKey(item.label) || androidLabelKey(label) === androidLabelKey(item.name));
 function toggleBuyer(item) {
     if (locked.value || page.value?.buyersComplete !== true || item.enabled === false || !buyerChoices.value.includes(item) || buyerMode.value !== "custom") return;
@@ -40,6 +41,16 @@ const device = computed(() => connectedAndroidDevice(androidRuntime.devices, and
 const pending = computed(() => androidRuntime.pending[androidRuntime.deviceId]);
 const active = computed(() => androidIsActive(state.value));
 const locked = computed(() => readingTargets.value || Boolean(pending.value) || androidActive.value);
+const backendLocked = computed(() => locked.value || androidRuntime.inFlight > 0 || androidRuntime.listing);
+function changeBackend(event) {
+    error.value = "";
+    try {
+        if (backendLocked.value) throw new Error("请先停止活动任务，并等待所有操作和状态请求结束后切换模式");
+        switchAndroidBackend(event.target.value);
+        if (androidDesktop) refreshDevices();
+    } catch (value) { error.value = String(value.message || value); }
+    finally { event.target.value = androidRuntime.backend; }
+}
 const reservation = computed(() => page.value?.kind === "reservation");
 const prepared = computed(() => state.value?.prepared);
 const executionTarget = computed(() => prepared.value?.config || (['preparing', 'waiting', 'running', 'needs_action', 'interrupted', 'failed'].includes(state.value?.status) ? state.value?.config : null));
@@ -50,7 +61,7 @@ const logs = computed(() => [...(state.value?.logs || [])].reverse());
 const catalog = computed(() => page.value?.kind === 'picker' || page.value?.kind === 'reservation' ? page.value : state.value?.catalog);
 const sessions = computed(() => catalog.value?.sessions || []);
 const tiers = computed(() => androidLabelKey(phoneSession.value) === androidLabelKey(form.session) ? catalog.value?.tiers || [] : []);
-const context = () => ({ desktop: androidDesktop, devices: androidRuntime.devices, deviceId: androidRuntime.deviceId, page: page.value, catalog: catalog.value, verifiedTitle: verifiedTitle.value, invalidatedPreparedId: invalidatedPreparedId.value, submissionGuard: state.value?.submissionGuard });
+const context = () => ({ backend: androidRuntime.backend, desktop: androidDesktop, devices: androidRuntime.devices, deviceId: androidRuntime.deviceId, page: page.value, catalog: catalog.value, verifiedTitle: verifiedTitle.value, invalidatedPreparedId: invalidatedPreparedId.value, submissionGuard: state.value?.submissionGuard });
 const prepareProblem = computed(() => {
     try { androidConfig({ ...form, scheduled: false }, context()); return ""; }
     catch (value) { return String(value.message || value); }
@@ -87,7 +98,7 @@ function adoptPage(snapshot, preserveDraft = false) {
     if (!targetInitialized && snapshot.status === "ready" && snapshot.deviceId === androidRuntime.deviceId && snapshot.prepared?.id && restored) {
         restoringTarget = true;
         try {
-            Object.assign(form, { eventTitle: restored.eventTitle, session: restored.session, tier: restored.tier, quantity: restored.quantity, buyerLabels: [...(restored.buyerLabels || [])], autoSubmit: restored.autoSubmit === true });
+            Object.assign(form, { eventTitle: restored.eventTitle, session: restored.session, tier: restored.tier, quantity: restored.quantity, buyerLabels: [...(restored.buyerLabels || [])], autoSubmit: !usbMode.value && restored.autoSubmit === true });
             verifiedTitle.value = title;
             phoneSession.value = currentSession;
             invalidatedPreparedId.value = "";
@@ -114,19 +125,24 @@ function adoptPage(snapshot, preserveDraft = false) {
 
 async function refreshDevices() {
     error.value = "";
+    const generation = operationGeneration;
+    const backend = androidRuntime.backend;
+    const current = () => generation === operationGeneration && backend === androidRuntime.backend;
     try {
         await listAndroidDevices();
+        if (!current()) return;
         const deviceId = androidRuntime.deviceId;
         if (device.value && !pending.value) {
             const snapshot = await androidRequest("status", deviceId);
-            if (deviceId === androidRuntime.deviceId) adoptPage(snapshot, true);
+            if (current() && deviceId === androidRuntime.deviceId) adoptPage(snapshot, true);
         }
-    } catch (value) { error.value = String(value.message || value); }
+    } catch (value) { if (current()) error.value = String(value.message || value); }
 }
 
 async function perform(action, autoNavigate = true) {
     error.value = "";
     const deviceId = androidRuntime.deviceId;
+    const backend = androidRuntime.backend;
     const generation = ++operationGeneration;
     readingTargets.value = true;
     try {
@@ -148,25 +164,30 @@ async function perform(action, autoNavigate = true) {
             if (generation !== operationGeneration) return;
             if (deviceId === androidRuntime.deviceId) adoptPage(snapshot);
         }
-    } catch (value) { error.value = String(value.message || value); }
-    finally { readingTargets.value = false; }
+    } catch (value) { if (generation === operationGeneration) error.value = String(value.message || value); }
+    finally { if (backend === androidRuntime.backend && deviceId === androidRuntime.deviceId) readingTargets.value = false; }
 }
 
 async function stopDevice(deviceId) {
     error.value = "";
-    operationGeneration += 1;
+    const generation = ++operationGeneration;
+    const backend = androidRuntime.backend;
     try { await androidRequest("stop", deviceId); }
-    catch (value) { error.value = String(value.message || value); }
+    catch (value) { if (generation === operationGeneration && backend === androidRuntime.backend) error.value = String(value.message || value); }
 }
 
 async function acknowledgeSubmission() {
     error.value = "";
     const guard = state.value?.submissionGuard;
     if (!submissionReviewed.value || !guard?.blocked || !guard.attemptId || locked.value) return;
+    const generation = operationGeneration;
+    const backend = androidRuntime.backend;
+    const deviceId = androidRuntime.deviceId;
+    const current = () => generation === operationGeneration && backend === androidRuntime.backend && deviceId === androidRuntime.deviceId;
     try {
-        await androidRequest("acknowledge_submission", androidRuntime.deviceId, { attemptId: guard.attemptId, acknowledged: true });
-        submissionReviewed.value = false;
-    } catch (value) { error.value = String(value.message || value); }
+        await androidRequest("acknowledge_submission", deviceId, { attemptId: guard.attemptId, acknowledged: true });
+        if (current()) submissionReviewed.value = false;
+    } catch (value) { if (current()) error.value = String(value.message || value); }
 }
 
 function logTime(value) {
@@ -184,11 +205,15 @@ watch(() => [androidLabelKey(form.eventTitle), androidLabelKey(form.session), an
 watch(() => [androidRuntime.deviceId, state.value?.submissionGuard?.attemptId, state.value?.submissionGuard?.orderState], () => {
     submissionReviewed.value = false;
 }, { flush: "sync" });
-watch(() => androidRuntime.deviceId, () => {
+watch(() => androidRuntime.backend, () => {
+    operationGeneration += 1;
+    readingTargets.value = false;
+}, { flush: "sync" });
+watch(() => [androidRuntime.deviceId, androidRuntime.backend], () => {
     restoringTarget = true;
     try {
         verifiedTitle.value = ""; phoneSession.value = ""; invalidatedPreparedId.value = "";
-        form.eventTitle = ""; form.session = ""; form.tier = ""; form.quantity = 1; form.buyerLabels = []; form.autoSubmit = false; error.value = "";
+        form.eventTitle = ""; form.session = ""; form.tier = ""; form.quantity = 1; form.buyerLabels = []; form.autoSubmit = false; form.scheduled = false; form.startAt = ""; submissionReviewed.value = false; error.value = "";
         targetInitialized = false;
     } finally { restoringTarget = false; }
 }, { flush: "sync" });
@@ -201,14 +226,14 @@ onUnmounted(() => clearInterval(timer));
 
 <template>
     <div class="workspace android-workspace">
-        <div class="page-heading"><div><div class="eyebrow">ANDROID · DAMAI APP</div><h1>安卓真机工作台</h1><p>自动读取场次和票档，按你的设置推进到确认页或支付宝。</p></div><span class="pill">真人完成支付</span></div>
+        <div class="page-heading"><div><div class="eyebrow">ANDROID · DAMAI APP</div><h1>安卓真机工作台</h1><p>{{ usbMode ? '电脑USB发起、手机核验，停在确认页，不提交不付款' : '自动读取场次和票档，按你的设置推进到确认页或支付宝。' }}</p></div><span class="pill">{{ usbMode ? 'USB 辅助 · 仅核验' : '旧模式 · 真人完成支付' }}</span></div>
         <div v-if="error || androidRuntime.listError" class="notice error" role="alert"><UiIcon name="info" />{{ error || androidRuntime.listError }}</div>
         <div v-if="androidRuntime.pollError" class="notice warning" role="alert"><UiIcon name="info" />{{ androidRuntime.pollError }}</div>
         <div v-for="task in androidActiveTasks.filter(item => item.deviceId !== androidRuntime.deviceId)" :key="task.deviceId" class="notice warning"><span>另一台手机还有准备中或执行中的任务。</span><button class="button danger small" @click="stopDevice(task.deviceId)">停止该任务</button></div>
 
         <section class="panel android-connection">
             <div class="section-heading"><span class="android-step">1</span><div><h2>连接与准备</h2><p>手机解锁并打开目标演出；登录保持在手机。</p></div><span class="pill" :class="{ 'android-muted': !device }">{{ device ? 'USB 已连接' : androidDesktop ? '等待连接' : '浏览器预览 · 未连接' }}</span></div>
-            <div class="android-connection-row"><div class="field"><label class="field-label" for="android-device">USB 设备</label><select id="android-device" class="text-input" v-model="androidRuntime.deviceId" :disabled="!androidDesktop || locked || androidRuntime.listing"><option value="">{{ androidRuntime.devices.length ? '请选择设备' : '尚未发现设备' }}</option><option v-for="item in androidRuntime.devices" :key="item.serial" :value="item.serial">{{ item.model || 'Android' }} · {{ item.serial.slice(-4) }} · {{ deviceStateLabels[item.state] || item.state }}</option><option v-if="androidRuntime.deviceId && !androidRuntime.devices.some(item => item.serial === androidRuntime.deviceId)" :value="androidRuntime.deviceId">之前选择的设备已断开</option></select></div><button class="button secondary" :disabled="!androidDesktop || androidRuntime.listing || locked" @click="refreshDevices"><UiIcon name="refresh" />{{ androidRuntime.listing ? '检查中…' : '刷新设备' }}</button><button class="button primary" :disabled="!device || locked" @click="perform('inspect')"><UiIcon name="search" />自动读取演出与票档</button><button v-if="page?.kind === 'detail'" class="button secondary" :disabled="!device || locked || !page.canOpenPicker || !verifiedTitle" @click="perform('open_picker')">进入选票<UiIcon name="arrow" /></button></div>
+            <div class="android-connection-row"><div class="field"><label class="field-label" for="android-backend">执行模式</label><select id="android-backend" class="text-input" :value="androidRuntime.backend" :disabled="backendLocked" @change="changeBackend"><option value="usb">USB 辅助正式版（仅订单核验）</option><option value="legacy">旧 Python 驱动（保留原模式）</option></select></div><div class="field"><label class="field-label" for="android-device">USB 设备</label><select id="android-device" class="text-input" v-model="androidRuntime.deviceId" :disabled="!androidDesktop || locked || androidRuntime.listing"><option value="">{{ androidRuntime.devices.length ? '请选择设备' : '尚未发现设备' }}</option><option v-for="item in androidRuntime.devices" :key="item.serial" :value="item.serial">{{ item.model || 'Android' }} · {{ item.serial.slice(-4) }} · {{ deviceStateLabels[item.state] || item.state }}</option><option v-if="androidRuntime.deviceId && !androidRuntime.devices.some(item => item.serial === androidRuntime.deviceId)" :value="androidRuntime.deviceId">之前选择的设备已断开</option></select></div><button class="button secondary" :disabled="!androidDesktop || androidRuntime.listing || locked" @click="refreshDevices"><UiIcon name="refresh" />{{ androidRuntime.listing ? '检查中…' : '刷新设备' }}</button><button class="button primary" :disabled="!device || locked" @click="perform('inspect')"><UiIcon name="search" />自动读取演出与票档</button><button v-if="page?.kind === 'detail'" class="button secondary" :disabled="!device || locked || !page.canOpenPicker || !verifiedTitle" @click="perform('open_picker')">进入选票<UiIcon name="arrow" /></button></div>
             <div class="android-read-status"><span v-if="pending" class="android-request" role="status">{{ requestLabels[pending] || '正在处理' }}…</span><span v-else>{{ page ? androidPageLabels[page.kind] || '未识别页面' : '连接后，点击读取当前演出' }}</span><span v-if="recentRead">最近读取 {{ elapsedLabel(recentRead.value) }}</span><span v-if="state?.metrics?.cacheHit === true">本次复用识别结果</span></div>
         </section>
 
@@ -244,16 +269,20 @@ onUnmounted(() => clearInterval(timer));
                         <textarea id="android-buyer-labels" class="text-input android-buyer-input" rows="3" v-model="buyerText" :disabled="locked" placeholder="每行输入一个准确姓名，或手机列表中的完整显示标签" aria-describedby="android-buyer-help"></textarea>
                         <p id="android-buyer-help" class="field-hint">可以在执行前直接填写姓名，无需先进入确认页。人数须与张数一致且不能重复；同名时请使用含证件类型和脱敏号码的完整显示标签。每行最多 300 个字符，请勿填写完整证件号码。</p>
                     </template>
-                    <p class="field-hint">观演人列表仅在手机订单确认页可读取。若需查看，请手动进入确认页后点击下方读取；选择后请在手机返回选票页，再重新读取演出与票档、锁定目标。</p>
-                    <button class="button secondary small" :disabled="!device || locked" @click="perform('inspect', false)">读取当前手机页面 / 观演人</button>
-                    <div v-if="page?.kind === 'confirm'" class="android-buyer-choices space-top">
+                    <p v-if="usbMode" class="field-hint">姓名和证件信息仅在手机核对，不回传或展示手机身份列表。桌面只显示核验结果及已选人数；自定义姓名或显示标签仍可手动输入。</p>
+                    <p v-else class="field-hint">观演人列表仅在手机订单确认页可读取。若需查看，请手动进入确认页后点击下方读取；选择后请在手机返回选票页，再重新读取演出与票档、锁定目标。</p>
+                    <button class="button secondary small" :disabled="!device || locked" @click="perform('inspect', false)">{{ usbMode ? '读取当前手机页面 / 核验结果' : '读取当前手机页面 / 观演人' }}</button>
+                    <div v-if="usbMode && page?.kind === 'confirm'" class="space-top">
+                        <p class="field-hint">{{ page.orderVerified === true ? '手机已完成订单核验。' : '请在手机核对订单与观演人，当前结果尚未确认。' }}{{ Number.isInteger(page.selectedBuyerCount) ? ` 已选 ${page.selectedBuyerCount} 位观演人。` : '' }}{{ page.defaultFirstSelected === true ? ' 已按手机列表顺序核对默认选择。' : '' }}</p>
+                    </div>
+                    <div v-if="!usbMode && page?.kind === 'confirm'" class="android-buyer-choices space-top">
                         <p class="field-hint">{{ page.buyersComplete === true ? '已读取完整观演人列表。' : '观演人列表尚未完整读取，暂不可勾选；以下仅为当前读取到的条目，请在手机核对。' }}</p>
                         <label v-for="(item, index) in buyerChoices" :key="`${item.label}-${index}`" class="android-buyer-choice"><input type="checkbox" :checked="buyerMode === 'custom' && buyerChosen(item)" :disabled="locked || page.buyersComplete !== true || buyerMode !== 'custom' || item.enabled === false" @change="toggleBuyer(item)" /><span>{{ item.label }}<small>{{ item.enabled === false ? ' · 当前不可选' : '' }}{{ item.selected ? ' · 手机当前已选' : '' }}</small></span></label>
                         <p v-if="!buyerChoices.length" class="field-hint">当前未读取到观演人；可先输入准确姓名，执行时再核对匹配。</p>
                         <p v-if="buyerMode === 'default' && buyerChoices.length" class="field-hint">切换为自定义后可勾选上述条目；默认模式以执行时手机列表的前 N 位为准。</p>
                     </div>
                 </div>
-                <div class="android-submit-option space-top"><label><input type="checkbox" v-model="form.autoSubmit" :disabled="locked" /> 自动提交订单并跳转支付宝</label><p class="field-hint">执行时会先核对日期、票价、总额和张数，再按上述配置选择观演人。未勾选则停在订单确认页，由你核对并提交；仅勾选后才会自动提交一次，进入支付宝即停止，由你付款。</p></div>
+                <div v-if="!usbMode" class="android-submit-option space-top"><label><input type="checkbox" v-model="form.autoSubmit" :disabled="locked" /> 自动提交订单并跳转支付宝</label><p class="field-hint">执行时会先核对日期、票价、总额和张数，再按上述配置选择观演人。未勾选则停在订单确认页，由你核对并提交；仅勾选后才会自动提交一次，进入支付宝即停止，由你付款。</p></div>
                 <div class="android-prepare-footer"><button class="button primary full" :disabled="locked || Boolean(prepareProblem)" @click="perform('prepare')"><UiIcon name="lock" />{{ state?.status === 'preparing' ? '正在锁定与预热…' : prepared ? '重新锁定并预热' : '锁定目标并预热' }}</button><p class="field-hint">{{ prepareProblem || (page?.kind === 'detail' && page?.purchaseAvailability === 'upcoming' ? '先核对演出并记录计划目标；场次、票档和张数在开售后逐项核对。' : '现在核对并选择场次、票档和张数，停在下一步按钮前。') }}</p></div>
             </section>
 
@@ -263,7 +292,7 @@ onUnmounted(() => clearInterval(timer));
                 <p v-if="prepared?.config && eventOnlyPreparation" class="field-label space-top">计划目标 · 场次与票档尚未核对</p>
                 <dl v-if="executionTarget" class="android-locked-target"><div><dt>{{ eventOnlyPreparation ? '已核对演出' : prepared ? '已锁定演出' : '本次演出' }}</dt><dd>{{ executionTarget.eventTitle }}</dd></div><div><dt>{{ eventOnlyPreparation ? '计划场次' : '场次' }}</dt><dd>{{ executionTarget.session }}</dd></div><div><dt>{{ eventOnlyPreparation ? '计划票档 / 张数' : '票档 / 张数' }}</dt><dd>{{ executionTarget.tier }} · {{ executionTarget.quantity }} 张</dd></div><div><dt>观演人</dt><dd>{{ executionTarget.buyerLabels?.length ? executionTarget.buyerLabels.join('；') : `默认选择手机列表前 ${executionTarget.quantity} 位` }}</dd></div><div v-if="prepared?.at"><dt>准备时间</dt><dd>{{ formatTime(prepared.at) }}</dd></div></dl>
                 <div v-if="state?.status === 'waiting'" class="android-countdown"><small>距计划开始</small><strong>{{ secondsLeft }}<span>秒</span></strong><p>{{ formatTime(state.config?.startAt) }} · 北京时间</p></div>
-                <div v-else class="android-start-controls"><div class="segmented-control" aria-label="执行方式"><button :class="{ selected: !form.scheduled }" :disabled="locked" @click="form.scheduled = false">立即执行</button><button :class="{ selected: form.scheduled }" :disabled="locked" @click="form.scheduled = true">定时开始</button></div><div v-if="form.scheduled" class="space-top"><label class="field-label" for="android-start">开始时间（北京时间，未来 7 天内）</label><input id="android-start" type="datetime-local" step="1" class="text-input" v-model="form.startAt" :disabled="locked" /></div><button class="button primary full space-top" :disabled="locked || Boolean(runProblem)" @click="perform('start')"><UiIcon :name="form.scheduled ? 'clock' : 'play'" />{{ form.scheduled ? '进入定时待命' : form.autoSubmit ? '执行到支付宝后暂停' : '立即执行到确认页' }}</button><p class="field-hint">{{ targetReady ? runProblem || (form.autoSubmit ? '保持手机解锁。将提交订单并在支付宝前台暂停，付款由本人完成。' : '保持手机解锁、大麦在前台。到订单确认页停止，由本人提交。') : '完成锁定与预热后才可执行；修改目标需要重新准备。' }}</p></div>
+                <div v-else class="android-start-controls"><div class="segmented-control" aria-label="执行方式"><button :class="{ selected: !form.scheduled }" :disabled="locked" @click="form.scheduled = false">立即执行</button><button :class="{ selected: form.scheduled }" :disabled="locked" @click="form.scheduled = true">定时开始</button></div><div v-if="form.scheduled" class="space-top"><label class="field-label" for="android-start">开始时间（北京时间，未来 {{ usbMode ? '24 小时' : '7 天' }}内）</label><input id="android-start" type="datetime-local" step="1" class="text-input" v-model="form.startAt" :disabled="locked" /></div><button class="button primary full space-top" :disabled="locked || Boolean(runProblem)" @click="perform('start')"><UiIcon :name="form.scheduled ? 'clock' : 'play'" />{{ form.scheduled ? '进入定时待命' : form.autoSubmit ? '执行到支付宝后暂停' : '立即执行到确认页' }}</button><p class="field-hint">{{ targetReady ? runProblem || (usbMode ? '电脑USB发起、手机核验，停在确认页，不提交不付款。保持手机解锁、大麦在前台。' : form.autoSubmit ? '保持手机解锁。将提交订单并在支付宝前台暂停，付款由本人完成。' : '保持手机解锁、大麦在前台。到订单确认页停止，由本人提交。') : '完成锁定与预热后才可执行；修改目标需要重新准备。' }}</p></div>
                 <p class="android-execution-note"><UiIcon name="info" />切换工作台页面不会取消任务；停止可阻止后续动作。</p>
             </section>
         </div>

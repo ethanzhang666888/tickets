@@ -18,6 +18,9 @@ export function androidScheduleTime(value) {
 }
 
 export function androidConfig(form, context, now = Date.now()) {
+    const backend = context.backend ?? "usb";
+    if (!["usb", "legacy"].includes(backend)) throw new Error("请选择有效的安卓执行模式");
+    if (backend === "usb" && form.autoSubmit === true) throw new Error("USB 模式仅核验订单，不允许自动提交或付款");
     if (!context.desktop) throw new Error("请在 Tickets 桌面应用中连接手机，浏览器只提供界面预览");
     if (context.submissionGuard?.blocked) throw new Error("存在待核实的订单提交记录，请先在手机检查订单状态并明确确认。");
     if (!connectedAndroidDevice(context.devices, context.deviceId)) throw new Error("请选择已通过 USB 授权的在线设备");
@@ -51,7 +54,8 @@ export function androidConfig(form, context, now = Date.now()) {
     const buyerLabels = labels.map(label => label.trim());
     const startAt = form.scheduled ? androidScheduleTime(form.startAt) : null;
     if (form.scheduled && (!startAt || startAt <= now)) throw new Error("请选择晚于当前时间的开始时间（北京时间）");
-    if (form.scheduled && startAt > now + 7 * 86400_000) throw new Error("开始时间须在未来 7 天内（北京时间）");
+    const scheduleLimit = backend === "usb" ? 86400_000 : 7 * 86400_000;
+    if (form.scheduled && startAt > now + scheduleLimit) throw new Error(`开始时间须在未来 ${backend === "usb" ? "24 小时" : "7 天"}内（北京时间）`);
     return { eventTitle, session, tier, quantity: form.quantity, buyerLabels, autoSubmit: form.autoSubmit === true, startAt, timeoutSeconds: 120 };
 }
 

@@ -6,7 +6,7 @@ import { androidConfig, androidPreparedConfig, androidLowestTier, androidTargetM
 
 const now = Date.UTC(2026, 9, 3, 1);
 const form = () => ({ eventTitle: "测试演出", session: "2026-10-17 周六 19:30", tier: "看台 380元", quantity: 1, buyerLabels: [], scheduled: false, startAt: "" });
-const context = () => ({ desktop: true, deviceId: "usb-device", devices: [{ serial: "usb-device", state: "device", model: "HUAWEI" }], page: { kind: "picker", title: "测试演出", blockers: [], sessions: [{ label: form().session, selected: true }], tiers: [{ label: form().tier }] }, verifiedTitle: "测试演出" });
+const context = () => ({ backend: "legacy", desktop: true, deviceId: "usb-device", devices: [{ serial: "usb-device", state: "device", model: "HUAWEI" }], page: { kind: "picker", title: "测试演出", blockers: [], sessions: [{ label: form().session, selected: true }], tiers: [{ label: form().tier }] }, verifiedTitle: "测试演出" });
 
 test("Android starts only with a real authorized device in the desktop app", () => {
     assert.throws(() => androidConfig(form(), { ...context(), desktop: false }, now), /桌面应用/);
@@ -75,6 +75,65 @@ test("Android scheduling uses Beijing time and rejects past or normalized invali
     assert.throws(() => androidConfig({ ...form(), scheduled: true, startAt: "2026-10-10T09:00:01" }, context(), now), /7 天/);
 });
 
+test("USB defaults reject submission, retain manual attendees, and cap scheduling at 24 hours", () => {
+    for (const backend of ["usb", undefined]) {
+        const usb = { ...context(), backend };
+        assert.throws(() => androidConfig({ ...form(), autoSubmit: true }, usb, now), /USB.*提交/);
+        assert.deepEqual(androidConfig({ ...form(), buyerLabels: ["甲"] }, usb, now).buyerLabels, ["甲"]);
+        assert.equal(androidConfig({ ...form(), scheduled: true, startAt: "2026-10-04T09:00:00" }, usb, now).startAt, now + 86400_000);
+        assert.throws(() => androidConfig({ ...form(), scheduled: true, startAt: "2026-10-04T09:00:01" }, usb, now), /24 小时/);
+    }
+    assert.throws(() => androidConfig(form(), { ...context(), backend: "other" }, now), /模式/);
+    assert.equal(androidConfig({ ...form(), autoSubmit: true }, context(), now).autoSubmit, true);
+});
+
+function serviceHarness(invoke) {
+    const script = readFileSync(new URL("../src/services/android.js", import.meta.url), "utf8").replace(/^import .*;\r?$/gm, "").replace(/^export /gm, "");
+    return new Function("reactive", "computed", "invoke", "androidIsActive", "window", "setTimeout", "clearTimeout", `${script}\nreturn { androidRuntime, androidRequest, switchAndroidBackend, refreshAndroidStatuses };`)(reactive, computed, invoke, androidIsActive, { __TAURI_IPC__: true }, () => 1, () => {});
+}
+
+const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+};
+
+test("desktop requests default to USB, prevent override and reject automatic submission before invoke", async () => {
+    const calls = [];
+    const service = serviceHarness(async (_command, args) => { calls.push(args.request); return { deviceId: "usb-device", status: "idle", updatedAt: 1 }; });
+    assert.equal(service.androidRuntime.backend, "usb");
+    await assert.rejects(service.androidRequest("prepare", "usb-device", { config: { autoSubmit: true } }), /USB.*提交/);
+    assert.equal(calls.length, 0);
+    await service.androidRequest("inspect", "usb-device", { backend: "legacy", action: "start", deviceId: "other" });
+    assert.deepEqual(calls[0], { action: "inspect", deviceId: "usb-device", backend: "usb" });
+    service.switchAndroidBackend("legacy");
+    assert.deepEqual(service.androidRuntime.states, {});
+    await service.androidRequest("status", "usb-device");
+    assert.equal(calls[1].backend, "legacy");
+});
+
+test("backend switching rejects active tasks and all in-flight requests including status and superseded reads", async () => {
+    const read = deferred();
+    const status = deferred();
+    const service = serviceHarness((_command, args) => args.request.action === "inspect" ? read.promise : args.request.action === "status" ? status.promise : Promise.resolve({ deviceId: "usb-device", status: "cancelled", updatedAt: 3 }));
+    const readRequest = service.androidRequest("inspect", "usb-device");
+    await service.androidRequest("stop", "usb-device");
+    assert.throws(() => service.switchAndroidBackend("legacy"), /操作|请求/);
+    read.resolve({ deviceId: "usb-device", status: "running", updatedAt: 1 });
+    await readRequest;
+    assert.equal(service.androidRuntime.states["usb-device"].status, "cancelled");
+    const statusRequest = service.androidRequest("status", "usb-device");
+    assert.throws(() => service.switchAndroidBackend("legacy"), /操作|请求/);
+    status.resolve({ deviceId: "usb-device", status: "running", updatedAt: 4 });
+    await statusRequest;
+    assert.throws(() => service.switchAndroidBackend("legacy"), /活动|执行/);
+    service.androidRuntime.states["usb-device"].status = "ready";
+    service.switchAndroidBackend("legacy");
+    assert.equal(service.androidRuntime.backend, "legacy");
+    assert.deepEqual(service.androidRuntime.states, {});
+    assert.deepEqual(service.androidRuntime.pending, {});
+});
+
 test("preparing, waiting and running tasks remain active when their page is hidden", () => {
     for (const status of ["preparing", "waiting", "running"]) assert.equal(androidIsActive({ status }), true);
     for (const status of ["idle", "ready", "needs_action", "cancelled", "interrupted", "failed"]) assert.equal(androidIsActive({ status }), false);
@@ -109,13 +168,54 @@ test("execution requires the exact ready preparation, and target edits invalidat
 function preparedView(verification = "full", request = null, buyerLabels = []) {
     const snapshot = { status: "ready", deviceId: "usb-device", prepared: { id: "ready-1", at: now, verification, readiness: verification === "event_only" ? "waiting_sale" : "selected", config: { ...androidConfig(form(), context(), now), tier: "内场1680元", quantity: 2, buyerLabels } }, page: { kind: verification === "event_only" ? "detail" : "picker", title: "测试演出", blockers: [], sessions: [{ label: form().session, selected: true }], tiers: [{ label: "看台380元" }, { label: "内场1680元" }] } };
     if (verification === "event_only") snapshot.catalog = { ...snapshot.page };
-    const runtime = reactive({ deviceId: "usb-device", devices: context().devices, states: { "usb-device": snapshot }, pending: {} });
-    const dependencies = { reactive, ref, computed, watch, onMounted: () => {}, onUnmounted: () => {}, androidRuntime: runtime, androidDesktop: true, androidActive: ref(false), androidActiveTasks: ref([]), androidRequest: async (action, ...args) => { if (request) return request(runtime, action, ...args); assert.equal(action, "status"); return snapshot; }, listAndroidDevices: async () => runtime.devices, androidStatusLabels: {}, androidPageLabels: {}, androidConfig, androidPreparedConfig, androidLowestTier, androidTargetMatchesPrepared, androidIsActive, connectedAndroidDevice, androidLabelKey, formatTime: value => String(value) };
+    const runtime = reactive({ backend: "legacy", inFlight: 0, deviceId: "usb-device", devices: context().devices, states: { "usb-device": snapshot }, pending: {} });
+    const dependencies = { reactive, ref, computed, watch, onMounted: () => {}, onUnmounted: () => {}, androidRuntime: runtime, androidDesktop: true, androidActive: ref(false), androidActiveTasks: ref([]), switchAndroidBackend: backend => { runtime.states = {}; runtime.backend = backend; }, androidRequest: async (action, ...args) => { if (request) return request(runtime, action, ...args); assert.equal(action, "status"); return snapshot; }, listAndroidDevices: async () => runtime.devices, androidStatusLabels: {}, androidPageLabels: {}, androidConfig, androidPreparedConfig, androidLowestTier, androidTargetMatchesPrepared, androidIsActive, connectedAndroidDevice, androidLabelKey, formatTime: value => String(value) };
     const script = readFileSync(new URL("../src/views/android.vue", import.meta.url), "utf8").split("<script setup>")[1].split("</script>")[0].replace(/^import .*;\r?$/gm, "");
     const scope = effectScope();
-    const view = scope.run(() => new Function(...Object.keys(dependencies), `${script}\nreturn { form, refreshDevices, adoptPage, perform, stopDevice, invalidatedPreparedId, targetReady, runProblem, stateTitle, preparationDescription, executionTarget, submissionReviewed, acknowledgeSubmission, buyerMode, buyerText, buyerChoices, toggleBuyer };`)(...Object.values(dependencies)));
+    const view = scope.run(() => new Function(...Object.keys(dependencies), `${script}\nreturn { form, refreshDevices, adoptPage, perform, stopDevice, invalidatedPreparedId, targetReady, runProblem, stateTitle, preparationDescription, executionTarget, submissionReviewed, acknowledgeSubmission, buyerMode, buyerText, buyerChoices, toggleBuyer, usbMode, changeBackend, backendLocked };`)(...Object.values(dependencies)));
     return { view, runtime, stop: () => scope.stop() };
 }
+
+test("switching backend clears the full draft, schedule and preparation while USB never exposes phone identities", async () => {
+    const { view, runtime, stop } = preparedView("full", null, ["甲", "乙"]);
+    try {
+        await view.refreshDevices();
+        view.form.scheduled = true;
+        view.form.startAt = "2026-10-04T10:00";
+        view.form.autoSubmit = true;
+        runtime.states = {};
+        runtime.backend = "usb";
+        assert.deepEqual({ ...view.form }, { eventTitle: "", session: "", tier: "", quantity: 1, buyerLabels: [], autoSubmit: false, scheduled: false, startAt: "" });
+        assert.equal(view.targetReady.value, false);
+        assert.equal(view.usbMode.value, true);
+        runtime.states["usb-device"] = { status: "needs_action", page: { kind: "confirm", buyers: [{ label: "应仅在手机显示", enabled: true }], buyersComplete: true, selectedBuyerCount: 1, orderVerified: true } };
+        assert.deepEqual(view.buyerChoices.value, []);
+        view.buyerMode.value = "custom";
+        view.buyerText.value = "手动姓名";
+        assert.deepEqual(view.form.buyerLabels, ["手动姓名"]);
+        runtime.inFlight = 1;
+        assert.equal(view.backendLocked.value, true);
+    } finally { stop(); }
+});
+
+test("late old-backend view responses cannot restore a draft or continue navigation", async () => {
+    for (const action of ["status", "inspect"]) {
+        const response = deferred();
+        const calls = [];
+        const { view, runtime, stop } = preparedView("full", async (_runtime, request) => { calls.push(request); return response.promise; });
+        try {
+            const operation = action === "status" ? view.refreshDevices() : view.perform("inspect");
+            await Promise.resolve();
+            runtime.states = {};
+            runtime.backend = "usb";
+            response.resolve({ deviceId: "usb-device", status: "idle", page: { kind: "detail", title: "旧模式演出", canOpenPicker: true, blockers: [] } });
+            await operation;
+            assert.deepEqual(calls, [action]);
+            assert.equal(view.form.eventTitle, "");
+            assert.equal(view.targetReady.value, false);
+        } finally { stop(); }
+    }
+});
 
 test("custom attendees restore without invalidation and changed-back labels still require preparation", async () => {
     const labels = ["甲", "乙 · 身份证 · ****1234"];

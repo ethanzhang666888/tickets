@@ -1,18 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <!-- Storage instrumentation runs in a separate disposable application. It
-         cannot register accessibility, capture the screen, or open the bridge. -->
+    <!-- Disposable verification target; normal UI and services belong only to debug/release manifests. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:node="remove" />
-    <application android:label="本地存储隔离测试" tools:replace="android:label">
-        <activity android:name="local.tickets.companion.MainActivity" tools:node="remove" />
-        <activity android:name="local.tickets.companion.SyntheticActivity" tools:node="remove" />
-        <activity android:name="local.tickets.companion.ExecutionActivity" tools:node="remove" />
-        <receiver android:name="local.tickets.companion.execution.ExecutionStopReceiver" tools:node="remove" />
+    <application android:label="本地存储隔离测试">
         <activity android:name="local.tickets.companion.TouchBenchmarkActivity" android:exported="false" />
-        <service android:name="local.tickets.companion.InspectorAccessibilityService" tools:node="remove" />
-        <service android:name="local.tickets.companion.CaptureService" tools:node="remove" />
     </application>
 </manifest>

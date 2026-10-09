@@ -11,6 +11,8 @@ import android.os.SystemClock
 import local.tickets.companion.MainActivity
 import local.tickets.companion.Safety
 import local.tickets.companion.Session
+import local.tickets.companion.pages.DamaiPageParser
+import local.tickets.companion.pages.PageKind
 import local.tickets.companion.storage.AndroidDirectorySync
 import local.tickets.companion.storage.SubmissionFence
 import org.json.JSONObject
@@ -30,11 +32,21 @@ object LocalExecutionRuntime {
     @Volatile private var phase = "idle"
     @Volatile private var reason = "none"
     @Volatile private var readMs = 0L
+    @Volatile private var lastNativeReadFailure = "none"
+    @Volatile private var nativeReadRetries = 0
+    @Volatile private var visualMs = 0L
+    @Volatile private var visualMismatch: JSONObject? = null
+    @Volatile private var pageKind = "unread"
+    @Volatile private var pageBlockers: List<String> = emptyList()
     @Volatile private var dispatchMs = 0L
     @Volatile private var actions = 0
+    @Volatile private var lastAction = "none"
+    @Volatile private var lastDispatch = "none"
+    @Volatile private var gestureResult = "none"
     @Volatile private var startedAt = 0L
     @Volatile private var firstActionMs: Long? = null
-    @Volatile private var launchUntil = 0L
+    private var awaitingConfirmation = false
+    private var foregroundGuard: LocalForegroundGuard? = null
     private var context: Context? = null
     private var displaySignature: List<Int> = emptyList()
 
@@ -47,8 +59,10 @@ object LocalExecutionRuntime {
 
     fun isActive() = active
     fun status(): JSONObject = JSONObject().put("active", active).put("phase", phase).put("reason", reason)
-        .put("touchBackend", "accessibility_native_action").put("readMs", readMs)
-        .put("dispatchMs", dispatchMs).put("actions", actions).put("firstActionMs", firstActionMs ?: JSONObject.NULL)
+        .put("touchBackend", "accessibility_native_or_scoped_touch").put("readMs", readMs)
+        .put("lastNativeReadFailure", lastNativeReadFailure).put("nativeReadRetries", nativeReadRetries)
+        .put("visualMs", visualMs).put("visualMismatch", visualMismatch ?: JSONObject.NULL).put("pageKind", pageKind).put("pageBlockers", org.json.JSONArray(pageBlockers))
+        .put("dispatchMs", dispatchMs).put("actions", actions).put("lastAction", lastAction).put("lastDispatch", lastDispatch).put("gestureResult", gestureResult).put("firstActionMs", firstActionMs ?: JSONObject.NULL)
         .put("automaticSubmissionSupported", false).put("inventoryRefreshSupported", false)
         .put("usbDisconnectPolicy", "continue_locally_authorized_task")
 
@@ -60,9 +74,12 @@ object LocalExecutionRuntime {
             check(Session.accessibility != null && !Session.locked(appContext)) { "请先解锁并开启无障碍" }
             context = appContext.applicationContext
             displaySignature = displayShape(appContext)
+            awaitingConfirmation = false
             active = true; phase = "launching"; reason = "none"; actions = 0
-            readMs = 0; dispatchMs = 0; firstActionMs = null; startedAt = now
-            launchUntil = now + 1500
+            readMs = 0; lastNativeReadFailure = "none"; nativeReadRetries = 0
+            visualMs = 0; visualMismatch = null; pageKind = "unread"; pageBlockers = emptyList()
+            dispatchMs = 0; lastAction = "none"; lastDispatch = "none"; gestureResult = "none"; firstActionMs = null; startedAt = now
+            foregroundGuard = LocalForegroundGuard(Safety.DAMAI, now + 1500)
             val epoch = ++generation
             notifyStatus("任务已在手机授权 · 仅到确认页")
             schedule(epoch, engine, 1500)
@@ -75,16 +92,29 @@ object LocalExecutionRuntime {
         if (active) { active = false; phase = "stopped"; reason = stopReason; notifyStatus("任务已停止：$stopReason") }
     }
 
-    /** Called from accessibility/screen lifecycle events. No raw event text is retained. */
+    fun captureStopped(stopReason: String) = synchronized(gate) {
+        if (active && LocalCaptureGuard.revokes(stopReason, awaitingConfirmation)) stop("screen_reading_stopped")
+    }
+
+    /** Window-state events carry only package metadata, so a departure followed by return is still revoked. */
     @Suppress("DEPRECATION")
-    fun foregroundChanged() {
-        if (!active) return
-        val service = Session.accessibility ?: run { stop("accessibility_lost"); return }
-        if (Session.locked(service)) { stop("screen_locked"); return }
-        if (SystemClock.elapsedRealtime() < launchUntil) return
-        val root = service.rootInActiveWindow ?: return // Bounded read loop decides whether a transition recovered.
-        val allowed = try { root.packageName?.toString() == Safety.DAMAI } finally { root.recycle() }
-        if (!allowed) stop("foreground_changed")
+    fun foregroundChanged(windowPackage: String? = null) {
+        val epoch = synchronized(gate) {
+            if (!active) return
+            if (foregroundGuard?.departed(windowPackage, SystemClock.elapsedRealtime()) == true) {
+                stop("foreground_changed"); return
+            }
+            generation
+        }
+        try {
+            val service = Session.accessibility ?: run { fail(epoch, "accessibility_lost"); return }
+            if (Session.locked(service)) { fail(epoch, "screen_locked"); return }
+            val root = service.rootInActiveWindow ?: return // Bounded read loop handles missing transition roots.
+            val pkg = try { root.packageName?.toString() } finally { root.recycle() }
+            synchronized(gate) {
+                if (current(epoch) && foregroundGuard?.departed(pkg, SystemClock.elapsedRealtime()) == true) stop("foreground_changed")
+            }
+        } catch (_: RuntimeException) { fail(epoch, "foreground_unavailable") }
     }
 
     private fun current(epoch: Long) = synchronized(gate) { active && epoch == generation }
@@ -103,23 +133,65 @@ object LocalExecutionRuntime {
             if (displayShape(service) != displaySignature) { fail(epoch, "display_changed"); return }
             val now = SystemClock.elapsedRealtime()
             if (now >= engine.deadline()) { fail(epoch, "deadline"); return }
-            // Native-only executor does not rely on projection, desktop polling or a USB heartbeat.
-            val frame = NativePageAccess.read(service, ++captureId) { current(epoch) }
-                ?: run { fail(epoch, "native_page_unavailable"); return }
+            // Execution stays on the phone; visual reads use only separately granted projection.
+            var readFailure = NativeReadFailure.PLATFORM_ERROR
+            val frame = NativePageAccess.read(service, ++captureId, onFailure = { readFailure = it }) { current(epoch) }
+            if (frame == null) {
+                synchronized(gate) { if (current(epoch)) lastNativeReadFailure = readFailure.name.lowercase() }
+                // No stale tree is reused and no click is repeated. Unsafe classifications stop immediately.
+                when (val settling = engine.nativeReadUnavailable(SystemClock.elapsedRealtime(), readFailure)) {
+                    is ExecutionDecision.Wait -> {
+                        synchronized(gate) { if (current(epoch)) { nativeReadRetries++; phase = settling.reason } }
+                        schedule(epoch, engine, settling.untilElapsedMs - SystemClock.elapsedRealtime())
+                    }
+                    is ExecutionDecision.Stopped -> fail(epoch, settling.reason)
+                    else -> fail(epoch, "native_page_unavailable")
+                }
+                return
+            }
             frame.use {
                 if (!current(epoch)) return
-                synchronized(gate) { if (current(epoch)) readMs = SystemClock.elapsedRealtime() - frame.startedAt }
+                synchronized(gate) {
+                    if (current(epoch)) {
+                        readMs = SystemClock.elapsedRealtime() - frame.startedAt
+                        foregroundGuard?.departed(Safety.DAMAI, SystemClock.elapsedRealtime())
+                    }
+                }
                 // Phone storage errors or a prior unresolved phone submission block all execution.
                 // Desktop auto-submit remains a separate controller and must not run concurrently.
                 val appContext = context ?: return
                 val fence = SubmissionFence(File(appContext.noBackupFilesDir, "submissions"), AndroidDirectorySync)
                 if (fence.readState().blocked) { fail(epoch, "unresolved_submission"); return }
-                when (val decision = engine.tick(SystemClock.elapsedRealtime(), frame.snapshot)) {
+                val observation = DamaiPageParser().parse(frame.snapshot)
+                synchronized(gate) { if (current(epoch)) {
+                    pageKind = observation.kind.name
+                    pageBlockers = observation.blockers.map { it.name }
+                } }
+                val kind = observation.kind
+                val needsVisual = kind == PageKind.PICKER || kind == PageKind.DETAIL
+                val captureOwner = Session.capture
+                val visual = if (needsVisual) {
+                    if (captureOwner == null) { fail(epoch, "screen_reading_consent_required"); return }
+                    val visualStarted = SystemClock.elapsedRealtime()
+                    val evidence = ExecutionVisualCapture.capture(frame.snapshot) { current(epoch) && SystemClock.elapsedRealtime() < engine.deadline() }
+                        ?: run { fail(epoch, "visual_evidence_unavailable:${ExecutionVisualCapture.lastFailure}"); return }
+                    synchronized(gate) { if (current(epoch)) visualMs = SystemClock.elapsedRealtime() - visualStarted }
+                    evidence
+                } else null // Confirmation/buyer data must never enter OCR or screenshot processing.
+                if (visual != null) {
+                    val visualObservation = DamaiPageParser().parse(frame.snapshot, visual)
+                    // Fixed enum diagnostics only: no page text, images or attendee identities.
+                    synchronized(gate) { if (current(epoch)) {
+                        pageKind = visualObservation.kind.name
+                        pageBlockers = visualObservation.blockers.map { it.name }
+                    } }
+                }
+                when (val decision = engine.tick(SystemClock.elapsedRealtime(), frame.snapshot, visual)) {
                     is ExecutionDecision.Stopped -> fail(epoch, decision.reason)
                     is ExecutionDecision.Finished -> synchronized(gate) {
                         if (current(epoch)) {
                             active = false; phase = "confirmation"; reason = decision.reason
-                            generation++; notifyStatus("已到确认页，自动操作已停止。请人工核对；尚未提交订单。")
+                            generation++; notifyStatus("已核对选票和观演人，操作已停止。请人工复核并提交；尚未生成订单。")
                         }
                     }
                     is ExecutionDecision.Wait -> {
@@ -127,23 +199,94 @@ object LocalExecutionRuntime {
                         schedule(epoch, engine, decision.untilElapsedMs - SystemClock.elapsedRealtime())
                     }
                     is ExecutionDecision.Click -> {
-                        // Re-read immediately before dispatch. Coordinates/handles from an old page never authorize a click.
+                        // Self-drawn state can change without any native-tree change.
+                        val visualCheck = if (visual != null) {
+                            ExecutionVisualCapture.capture(frame.snapshot) { current(epoch) && SystemClock.elapsedRealtime() < engine.deadline() }
+                                ?: run { fail(epoch, "preclick_visual_unavailable"); return }
+                        } else null
+                        if (!VisualDispatchEvidence.agrees(visual, visualCheck, SystemClock.elapsedRealtime(), frame.snapshot)) {
+                            if (visual != null && visualCheck != null) {
+                                fun key(word: local.tickets.companion.pages.VisualWord) = DamaiPageParser.normalized(word.text) to word.bounds
+                                val beforeKeys = visual.words.map(::key).toSet()
+                                val afterKeys = visualCheck.words.map(::key).toSet()
+                                val changed = (visual.words.filter { key(it) !in afterKeys } + visualCheck.words.filter { key(it) !in beforeKeys })
+                                visualMismatch = JSONObject().put("ageMs", SystemClock.elapsedRealtime() - visualCheck.capturedAtElapsedMs)
+                                    .put("pulseAvailable", ExecutionCapturePolicy.detailPulseBounds(frame.snapshot) != null)
+                                    .put("wordsBefore", visual.words.size).put("wordsAfter", visualCheck.words.size)
+                                    .put("changed", org.json.JSONArray(changed.take(12).map { word -> JSONObject()
+                                        .put("length", word.text.length).put("bounds", word.bounds.toString())
+                                        .put("sameTextInBoth", visual.words.any { DamaiPageParser.normalized(it.text) == DamaiPageParser.normalized(word.text) } &&
+                                            visualCheck.words.any { DamaiPageParser.normalized(it.text) == DamaiPageParser.normalized(word.text) })
+                                        .put("inPulse", ExecutionCapturePolicy.detailPulseBounds(frame.snapshot)?.contains(word.bounds) == true)
+                                    }))
+                            }
+                            fail(epoch, "preclick_visual_changed"); return
+                        }
+                        // Read after OCR so the native frame still satisfies the 500 ms dispatch bound.
                         val fresh = NativePageAccess.read(service, ++captureId) { current(epoch) }
                             ?: run { fail(epoch, "preclick_page_unavailable"); return }
                         fresh.use {
                             if (!frame.samePage(fresh)) { fail(epoch, "preclick_page_changed"); return }
-                            synchronized(gate) {
-                                if (!current(epoch)) return
-                                val dispatchAt = SystemClock.elapsedRealtime()
-                                if (dispatchAt >= engine.deadline() || dispatchAt - fresh.startedAt > 500 || Session.locked(service) ||
-                                    displayShape(service) != displaySignature) {
-                                    stop("preclick_expired_or_locked"); return
+                            val result = LocalDispatchGuard.dispatch(
+                                gate = gate,
+                                prepare = {
+                                    val touchIndex = decision.action.touchNodeIndex
+                                    fresh.prepareClick(decision.action.nodeIndex, allowNonClickable = touchIndex == decision.action.nodeIndex) &&
+                                        (touchIndex == null || (visual != null &&
+                                            ScopedTouchTarget.nodeIndex(fresh.snapshot, decision.action.nodeIndex, decision.action.kind) == touchIndex &&
+                                            fresh.prepareClick(touchIndex, allowNonClickable = true)))
+                                },
+                                current = { current(epoch) },
+                                safe = {
+                                    NativePageAccess.foregroundMatches(service, fresh.windowId) &&
+                                        displayShape(service) == displaySignature && !Session.locked(service) &&
+                                        Session.accessibility === service && (visual == null || Session.capture === captureOwner) &&
+                                        VisualDispatchEvidence.agrees(visual, visualCheck, SystemClock.elapsedRealtime(), frame.snapshot)
+                                },
+                                now = SystemClock::elapsedRealtime,
+                                deadline = engine.deadline(),
+                                capturedAt = fresh.startedAt,
+                                perform = {
+                                    val dispatchAt = SystemClock.elapsedRealtime()
+                                    if (!engine.actionDispatched(decision.action, dispatchAt)) return@dispatch false
+                                    val touchIndex = decision.action.touchNodeIndex
+                                    lastAction = decision.action.kind.name
+                                    lastDispatch = if (touchIndex == null) "native" else "scoped_touch"
+                                    gestureResult = if (touchIndex == null) "not_used" else "pending"
+                                    val sent = if (touchIndex == null) fresh.performClick(decision.action.nodeIndex) else {
+                                        val bounds = fresh.snapshot.nodes[touchIndex].bounds
+                                        val path = android.graphics.Path().apply {
+                                            moveTo((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f)
+                                        }
+                                        val gesture = android.accessibilityservice.GestureDescription.Builder()
+                                            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60))
+                                            .build()
+                                        service.dispatchGesture(gesture, object : android.accessibilityservice.AccessibilityService.GestureResultCallback() {
+                                            override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                                                synchronized(gate) { if (current(epoch)) gestureResult = "completed" }
+                                            }
+                                            override fun onCancelled(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                                                synchronized(gate) { if (current(epoch)) gestureResult = "cancelled" }
+                                                fail(epoch, "scoped_touch_cancelled")
+                                            }
+                                        }, Session.main)
+                                    }
+                                    dispatchMs = SystemClock.elapsedRealtime() - dispatchAt
+                                    if (sent) {
+                                        if (decision.action.kind == ActionKind.NEXT) awaitingConfirmation = true
+                                        if (firstActionMs == null) firstActionMs = dispatchAt - startedAt
+                                        actions++; phase = "waiting_action_effect"; reason = "none"
+                                    }
+                                    sent
+                                },
+                            )
+                            when (result) {
+                                LocalDispatchGuard.Result.CANCELLED -> return
+                                LocalDispatchGuard.Result.EXPIRED_OR_UNSAFE -> { fail(epoch, "preclick_expired_or_locked"); return }
+                                LocalDispatchGuard.Result.PREPARE_REJECTED, LocalDispatchGuard.Result.REJECTED -> {
+                                    fail(epoch, "native_click_rejected"); return
                                 }
-                                val sent = fresh.click(decision.action.nodeIndex)
-                                dispatchMs = SystemClock.elapsedRealtime() - dispatchAt
-                                if (!sent) { stop("native_click_rejected"); return }
-                                if (firstActionMs == null) firstActionMs = dispatchAt - startedAt
-                                actions++; phase = "waiting_action_effect"; reason = "none"
+                                LocalDispatchGuard.Result.SENT -> Unit
                             }
                         }
                         schedule(epoch, engine, 40)
@@ -169,5 +312,14 @@ object LocalExecutionRuntime {
 }
 
 class ExecutionStopReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context?, intent: Intent?) { LocalExecutionRuntime.stop() }
+    override fun onReceive(context: Context?, intent: Intent?) {
+        // Manifest signature permission restricts the USB handoff to our signed applications.
+        // This endpoint can only revoke execution/capture; it cannot create plans or perform input.
+        if (intent?.action == "local.tickets.companion.USB_HANDOFF") {
+            LocalExecutionRuntime.stop("usb_handoff")
+            Session.revokeNativeAudit()
+            Session.capture?.stopSafely("usb_handoff")
+            resultCode = android.app.Activity.RESULT_OK
+        } else LocalExecutionRuntime.stop()
+    }
 }
